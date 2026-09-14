@@ -153,10 +153,16 @@ Out of scope:
 - None — semantics settled in design discussion (2026-09-14); do not widen the
   matcher without a new owner decision.
 
-- OWNER DECISION PENDING (cosmetic, out of pi-utils scope): after routing,
-  pi-ctx-kit's `tool_result` filter (`searchResultGrouping` on
-  `isSearchCommand`) re-processes routed output and stacks the
-  `RTK compact output` note on top of the `[fs-search] routed` note.
-  Routed results are already capped/formatted; owner may disable that one
-  technique in pi-ctx-kit config. Packet records it; pi-utils does not
-  touch pi-ctx-kit.
+- OWNER DECISION PENDING (information loss, not just cosmetic; out of
+  pi-utils scope): pi-ctx-kit's `tool_result` filter (`searchResultGrouping`
+  on `isSearchCommand`) rebuilds routed output from parsed `file:line:`
+  rows ONLY — verified against rtk/techniques/search.ts (2026-09-14):
+  (a) non-matching lines are dropped, losing the `[fs-search] routed` note
+  (incl. the hidden+gitignored superset disclosure) and the footer spill
+  path — full-output recovery degrades to re-running the search;
+  (b) double capping: router caps at 250 matches / 50KB, then rtk shows
+  50 results, 10/file, 70 chars/row; (c) 10KB middle-truncate safety net
+  can cut capped output further. Row data itself is never corrupted.
+  Cleanest fixes are on the pi-ctx-kit side: skip filtering when the
+  `[fs-search] routed` marker is present, or disable searchResultGrouping.
+  Packet records it; pi-utils does not touch pi-ctx-kit.
