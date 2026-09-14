@@ -93,6 +93,25 @@ Out of scope:
    ignore semantics + caps/spill).
 9. **details**: `{ routed: true, kind, ...core counts }` (grep:
    matchCount/fileCount/matchLimitReached/spillPath; glob: total/spillPath).
+10. **Wrapper unwrap (Amendment A1, 2026-09-14)**: pi-ctx-kit rewrites bash
+    commands through the rtk CLI before execution (its `tui.ts` `tool_call`
+    handler mutates `input.command`: `rg foo` -> `rtk rg foo`). The router
+    therefore strips **exactly one** leading token when it is in a whitelist,
+    BEFORE applying rules 1-9 to the remainder:
+    - Whitelist source: settings `bashRouter.unwrapPrefixes: string[]`,
+      DEFAULT `["rtk"]` (owner daily-driver; revisit default `[]` before npm
+      publish).
+    - Explicit whitelist, never blind-stripping: `sudo grep x /root/f` must
+      stay null (routing would drop sudo -> wrong semantics).
+    - Single unwrap only — `rtk rtk rg x` => null. Unknown wrappers (`foo
+      rg x`) => null. Unwrap applies before the dangerous-char scan; the
+      stripped token itself is not scanned.
+    - Non-search wrappers pass through untouched: `rtk read X` -> `read X` =>
+      null => bash runs `rtk read X` as before.
+    - Evidence rtk passthrough for search is loss-free: session logs 2026-09-14
+      show `rtk rg`/`rtk grep` return raw command output.
+    - API: `matchBashSearch(command, unwrapPrefixes?: readonly string[])`;
+      default `[]` keeps the pure-function tests hermetic.
 
 ## Coordination / Handoff
 
@@ -112,6 +131,11 @@ Out of scope:
 - Glue is reachable only via `runBash` with `!background && timeout===undefined`;
   routed execution returns note-prefixed text + `details.routed`.
 - Zero behavior change when matcher returns null (unchanged code path).
+- Amendment A1: with `unwrapPrefixes: ["rtk"]`, `bash: rg <pattern> <path>`
+  on a machine with the rtk rewriter active returns the routed note (the
+  live smoke that failed on 2026-09-14). Unwrap matrix tested: prefixed
+  searches route; `sudo ...`, double-prefix, unknown wrapper, `rtk read`, and
+  empty-list configs all stay null.
 - Decision 0012 written; README bullet added; pushed; CI green.
 
 ## Validation
@@ -128,3 +152,11 @@ Out of scope:
 
 - None — semantics settled in design discussion (2026-09-14); do not widen the
   matcher without a new owner decision.
+
+- OWNER DECISION PENDING (cosmetic, out of pi-utils scope): after routing,
+  pi-ctx-kit's `tool_result` filter (`searchResultGrouping` on
+  `isSearchCommand`) re-processes routed output and stacks the
+  `RTK compact output` note on top of the `[fs-search] routed` note.
+  Routed results are already capped/formatted; owner may disable that one
+  technique in pi-ctx-kit config. Packet records it; pi-utils does not
+  touch pi-ctx-kit.
