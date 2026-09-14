@@ -27,7 +27,15 @@ Quick test without installing:
 pi -e ./extensions/fs-search.ts -e ./extensions/shell-bg.ts
 ```
 
-For auto-discovery and hot `/reload`, symlink both entries into the global extensions dir:
+For auto-discovery and hot `/reload`, add the package root to the `extensions` array in `~/.pi/agent/settings.json` (pi reads the `pi.extensions` entries from `package.json`):
+
+```json
+{
+  "extensions": ["/absolute/path/to/pi-utilities"]
+}
+```
+
+Alternatively, symlink both entries into the global extensions dir:
 
 ```sh
 ln -s "$PWD/extensions/fs-search.ts" ~/.pi/agent/extensions/pi-utils-fs-search.ts
