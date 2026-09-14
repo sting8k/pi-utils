@@ -69,4 +69,6 @@ Tradeoffs:
 - Scaffold package + `src/common/` first; glob before grep; shell-bg core before glue.
 - D3 (rg resolver) and D5 (tempfile spill, no versioned spill store) confirmed per
   recommendation on 2026-09-14 — no open architecture items remain.
-- Revisit npm publish / remote push when the extensions are stable in daily use.
+- Private remote created and pushed early at the owner's request
+  (github.com/sting8k/pi-utils) — still no npm publish; revisit publishing when
+  the extensions are stable in daily use.
