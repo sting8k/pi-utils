@@ -1,235 +1,155 @@
-# just-harness
+# pi-utils
 
-Turn any software repo into an agent-ready workspace.
+Utility extensions for the [Pi coding agent](https://github.com/earendil-works/pi): a deep filesystem search (`grep` / `glob`) that also searches gitignored files, and a background shell (`shell-bg`) so long-running commands never eat the agent's turn while it waits.
 
-`just-harness` is a repository-level operating harness for Claude Code,
-Codex, Cursor, and other coding agents. It gives agents the missing project
-context they need before they change code: where to start, what the product
-contract says, how risky the work is, what proof is required, and which
-decisions future agents should inherit.
+## Features
 
-The app is what users touch. The harness is what agents touch.
+- `grep` (overrides the built-in): streaming ripgrep search over hidden **and** gitignored files by default, `--no-config` hardening, a cooperative 30s timeout, and match/byte caps with spill files for the full output
+- `glob` (new tool): find files by name pattern at any depth, sorted by modification time with the most recently changed files last, includes gitignored files
+- `bash` (overrides the built-in): commands still running after 30s auto-move to the background, `background: true` starts detached immediately, `timeout: N` kills the whole process tree
+- `shell_status` / `shell_kill`: poll, list, and stop background jobs; finished results are delivered into the conversation automatically
+- `/shell-bg` command and a live widget above the editor showing running jobs
+- One settings file, `~/.pi/agent/pi-utils.json`, auto-scaffolded with defaults on first run
+- Zero runtime dependencies beyond the Pi package; ripgrep is reused from `PATH` or Pi's managed bin dir
 
-## Why Star This Repo
+## Installation
 
-Star this repo if you want practical, reusable patterns for making AI-assisted
-software development more reliable, inspectable, and easier for humans to steer.
+Local checkout for now (no npm publish yet):
 
-This project is exploring a simple idea:
-
-> Coding agents do not only need better prompts. They need better repositories.
-
-## The Problem
-
-Most repos are built for humans reading code in a familiar codebase. Coding
-agents usually enter with only a chat prompt and a shallow snapshot of files.
-That leads to common failure modes:
-
-- The agent edits code before understanding product intent.
-- Important constraints live only in chat history or in someone's head.
-- Validation expectations are vague or discovered too late.
-- Architecture tradeoffs are repeated instead of inherited.
-- Large requests do not get broken into reviewable packet-sized work.
-
-## The Harness Approach
-
-A repository starts to have a harness when it helps an agent answer practical
-engineering questions without relying only on chat history:
-
-- What should I read first?
-- What type of work is this?
-- Which work or product contract does it affect?
-- How risky is the change?
-- What proof will show the work is done?
-- What decision or lesson should future agents inherit?
-
-In this repo, those answers live in:
-
-- `AGENTS.md` — the stable agent shim with local project notes and Harness doc links.
-- `docs/HARNESS.md` — the human-agent collaboration model.
-- `docs/FEATURE_INTAKE.md` — intake and warmup for tiny, normal, and high-risk work.
-- `docs/CONTEXT_RULES.md` — what to read and when.
-- `docs/GUARDRAILS.md` — durable project directives.
-- `docs/ARTIFACTS.md` — naming and folder taxonomy.
-- `docs/ARCHITECTURE.md` — architecture discovery and boundary rules.
-- `docs/TEST_MATRIX.md` — behavior-to-proof validation expectations.
-- `docs/stories/` — work packets and backlog.
-- `docs/decisions/` — durable decisions and tradeoffs.
-- `docs/templates/` — reusable packet, decision, and validation templates.
-
-OpenAI describes this shift as an agent-first world where humans steer and
-agents execute:
-
-https://openai.com/index/harness-engineering/
-
-## Install Harness Into A Project
-
-From a target project directory, run:
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/sting8k/just-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --yes
+```sh
+git clone <this repo> && cd pi-utilities
+bun install
 ```
 
-On Windows PowerShell, run:
+Quick test without installing:
 
-```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/sting8k/just-harness/main/scripts/install-harness.ps1"))) -Yes
+```sh
+pi -e ./extensions/fs-search.ts -e ./extensions/shell-bg.ts
 ```
 
-If the target already has `AGENTS.md`, `docs/`, or `scripts/`, choose one:
+For auto-discovery and hot `/reload`, symlink both entries into the global extensions dir:
 
-```bash
-# Update an existing Harness repo without moving existing files
-curl -fsSL "https://raw.githubusercontent.com/sting8k/just-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --yes
-
-# Back up and replace AGENTS.md, docs/, and scripts/
-curl -fsSL "https://raw.githubusercontent.com/sting8k/just-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --override --yes
+```sh
+ln -s "$PWD/extensions/fs-search.ts" ~/.pi/agent/extensions/pi-utils-fs-search.ts
+ln -s "$PWD/extensions/shell-bg.ts" ~/.pi/agent/extensions/pi-utils-shell-bg.ts
 ```
 
-```powershell
-# Update an existing Harness repo without moving existing files
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/sting8k/just-harness/main/scripts/install-harness.ps1"))) -Merge -Yes
+Requires `rg` on `PATH` (or run Pi's built-in grep once so Pi downloads ripgrep into `~/.pi/agent/bin`).
 
-# Back up and replace AGENTS.md, docs/, and scripts/
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/sting8k/just-harness/main/scripts/install-harness.ps1"))) -Override -Yes
+## Usage
+
+A typical working session — locate, read with the line numbers you were given, then kick off a build without blocking:
+
+```
+> where is the cache invalidation handled?
+
+grep(pattern="invalidate", include="*.ts")
+  3 matches in 2 files
+  src/cache/entry.ts:41:     invalidate(key: string) {
+  src/cache/entry.ts:97:     this.invalidate(oldKey)
+  src/cache/store.ts:12: import { invalidate } from "./entry.js"
+
+read(path="src/cache/entry.ts", offset=35, limit=30)
+  ...
+
+> ok, rebuild and check the failing test while it runs
+
+bash(command="npm run build && npm test", background=true)
+  bg-1 started in the background.
+    $ npm run build && npm test
+  ...
 ```
 
-Use `--merge` when a project already has Harness and you want to append newly
-added Harness files without moving the existing `AGENTS.md`, `docs/`, or
-`scripts/` paths into backup. Existing files stay untouched; only missing
-Harness files are created.
+## fs-search
 
-For older Harness installs whose `AGENTS.md` still contains the full generated
-operating guide, refresh it into the small stable shim:
+`grep` and `glob` share one idea: bugs like to hide in files that ordinary search skips (gitignored build output, lockfiles, `.env` files), so both tools include hidden and gitignored files by default. Pass `noIgnore: false` to `grep` when ignores should be respected.
 
-```bash
-curl -fsSL "https://raw.githubusercontent.com/sting8k/just-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --refresh-agent-shim --yes
+```
+grep(pattern="API_KEY", noIgnore=false)     # respect .gitignore this time
+grep(pattern="preset", include="*.md")      # single positive glob filter
+grep(pattern="line two", context=2)         # context lines like built-in grep
+grep(pattern="TODO", limit=500)             # raise the default 250-match cap
 ```
 
-The refresh backs up the existing file. If it detects the old
-Harness-generated guide, it replaces it with the shim. If the file appears
-custom, it appends or updates a marked Harness block instead of overwriting the
-project's local instructions.
+Rows are `path:line: text`, so the line number feeds straight into `read`'s `offset`. An empty result is a successful "No matches found." — never an error. Errors carry a `SEARCH_INVALID_PATTERN`, `SEARCH_FAILED`, `SEARCH_ABORTED`, or `SEARCH_RAW_OUTPUT_OVERFLOW` prefix.
 
-If the project is driven with Claude Code, add `--claude`. Claude Code never
-auto-loads `AGENTS.md`, so without this the installed harness is invisible to
-fresh sessions. The flag installs (or refreshes) a `CLAUDE.md` whose marked
-Harness block imports only the small `AGENTS.md` entrypoint. Other Harness docs
-are retrieved when the task requires them. An existing `CLAUDE.md` gets the
-block appended after a backup; plain installs without the flag never touch
-`CLAUDE.md`:
-
-```bash
-curl -fsSL "https://raw.githubusercontent.com/sting8k/just-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --claude --yes
+```
+glob(pattern="*.test.ts")                   # basenames at ANY depth
+glob(pattern="src/*.ts")                    # anchored: one level under src/
+glob(pattern="*.log", path="var")
 ```
 
-Or install into a specific path:
+Results are paths relative to the working directory, oldest first. When results exceed the cap, the inline list is cut and the full list is written to a temp file whose path is returned in the output.
 
-```bash
-curl -fsSL "https://raw.githubusercontent.com/sting8k/just-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --directory /path/to/project --yes
+## shell-bg
+
+`bash` keeps Pi's shell, cwd, and env but changes the lifecycle:
+
+| Situation | What happens |
+| --- | --- |
+| Command finishes quickly | Returns normally, exactly like before |
+| Still running after 30s (interactive) | Moved to the background: returns `moved to background, id=bg-1`; result is delivered when it finishes |
+| `background: true` | Detached from the start; returns the id immediately |
+| `timeout: N` | Whole process tree killed past N seconds |
+
+```
+shell_status()               # list every background job this session
+shell_status(id="bg-2")      # one job: status + output so far (or final result)
+shell_kill(id="bg-2")        # stop it and its whole process tree
 ```
 
-```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/sting8k/just-harness/main/scripts/install-harness.ps1"))) -Directory C:\path\to\project -Yes
+In interactive sessions, finished jobs deliver themselves into the conversation wrapped in `<shell_bg_result id="...">`. Under headless `pi -p`, nothing is delivered after the turn ends — the tool's own message tells the model to poll `shell_status` within the turn.
+
+```
+/shell-bg                    # same list as shell_status()
+/shell-bg kill bg-2          # same as shell_kill
 ```
 
-Use `--dry-run` on Bash or `-DryRun` on PowerShell to preview changes before
-writing files.
+A widget above the editor shows each running job's header and latest output line while it works.
 
-The installer also downloads the prebuilt Harness CLI for the current platform,
-verifies its `.sha256` checksum, and installs it at
-`scripts/bin/harness-cli` on macOS/Linux or `scripts/bin/harness-cli.exe` on
-Windows. The Rust CLI is the main Harness tool and stable command path.
+## Settings
 
-Harness CLI release assets are published from tags by the
-`Harness CLI Release` GitHub Actions workflow. The installer expects each
-release to include `harness-cli-<platform>` and
-`harness-cli-<platform>.sha256` assets for macOS arm64, macOS x64, Linux x64,
-Linux arm64, and Windows x64. The Windows asset is
-`harness-cli-windows-x64.exe` plus `harness-cli-windows-x64.exe.sha256`.
+All settings live in `~/.pi/agent/pi-utils.json` — created with these defaults on first start. Missing keys are filled in-memory without rewriting your edits; a broken file falls back to defaults with a warning toast:
 
-## Try The Flow
-
-The fastest way to understand the harness is to inspect the demo:
-
-- `docs/demo/README.md`: shows how a simple product idea becomes intake output, a flat work packet, proof expectations, and durable learning before implementation starts.
-
-The default flow is deliberately small:
-
-```text
-understand -> implement -> verify -> report
+```json
+{
+  "fsSearch": {
+    "noIgnore": true,
+    "globMaxResults": 100,
+    "grepMaxMatches": 250,
+    "grepMaxLineBytes": 2000,
+    "rawOutputMaxBytes": 20971520,
+    "timeoutMs": 30000,
+    "graceMs": 3000
+  },
+  "shellBg": {
+    "autoBackgroundMs": 30000,
+    "tailBytes": 8192,
+    "killGraceMs": 3000
+  }
+}
 ```
 
-Intake, work packets, traces, and decisions are available when risk, durable
-tracking, handoff, or consequential choices make them useful. They are not
-mandatory stages for routine work.
+Development:
 
-## Current State
-
-This repository is in Harness v0.
-
-There is no application implementation and no baked-in product specification yet. The current work is the reusable project harness: the file structure, agent operating model, intake process, guardrails, work packet templates, and validation expectations that help humans and agents turn a future user-provided spec into implementation work.
-
-## Product Sources
-
-No product contract is currently defined.
-
-When a user provides a project specification, add or reference it as the input spec for the first buildout, then derive smaller living artifacts from it:
-
-- `docs/product/`: current work contract files.
-- `docs/stories/`: work packets and backlog.
-- `docs/decisions/`: durable decisions and tradeoffs.
-- `docs/GUARDRAILS.md`: durable project directives.
-- `docs/ARTIFACTS.md`: naming and folder rules.
-- `docs/TEST_MATRIX.md`: behavior-to-proof control panel.
-
-Do not keep a project-specific spec or product breakdown in this harness until a real project supplies one.
-
-## Repository Structure
-
-```text
-project/
-  AGENTS.md
-  README.md
-  docs/
-    HARNESS.md
-    FEATURE_INTAKE.md
-    CONTEXT_RULES.md
-    GUARDRAILS.md
-    ARTIFACTS.md
-    ARCHITECTURE.md
-    TEST_MATRIX.md
-    TRACE_SPEC.md
-    HARNESS_BACKLOG.md
-    product/
-    stories/
-    decisions/
-    demo/
-    templates/
-  scripts/
+```sh
+bun run check   # biome + tsc --noEmit
+bun test        # unit tests for src/, glue tests against a fake ExtensionAPI
 ```
 
-## Contributing
+## Related Packages
 
-This project is early and benefits most from real-world agent failure cases,
-example harness installs, docs improvements, and reusable workflow patterns.
-See `CONTRIBUTING.md` for contribution ideas.
+- [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) — the extension host; `grep-core` is a fork of its streaming grep
+- [docs/pi-extensions-architecture-draft.md](docs/pi-extensions-architecture-draft.md) — design baseline for both extensions
+- [docs/decisions/0008-pi-extensions-architecture.md](docs/decisions/0008-pi-extensions-architecture.md) — locked architecture decisions
+- [docs/HARNESS.md](docs/HARNESS.md) — the repository harness this package develops under
 
-Useful contributions include:
+## Related Work
 
-- Show how the harness works in a real project.
-- Add missing templates or improve existing ones.
-- Propose validation patterns for different stacks.
-- Share failures where an agent made the wrong change because the repo lacked
-  context.
-- Compare harness behavior across Claude Code, Codex, Cursor, and other tools.
+- [pifydev/shell-background](https://github.com/pifydev/shell-background) (MIT) — the design `shell-bg` follows: log-file jobs, pid reconciliation after `/reload`, delivery-once, headless caveat
+- `@deepseek-ai/dsh` `tool-fs-search` — the semantics `grep`/`glob` implement: search ignored files, mtime ordering, hard caps, argv-only subprocess calls
+- [ripgrep](https://github.com/BurntSushi/ripgrep) — the search engine behind both tools
 
-## Share
+## License
 
-If this idea resonates, please star the repo and share it with someone building
-with coding agents.
-
-Short description:
-
-> An agent-ready repo harness for Claude Code, Codex, Cursor, and other coding
-> agents: AGENTS.md, work packets, proof matrix, guardrails, and decision records.
+[MIT](LICENSE)

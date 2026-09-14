@@ -1,3 +1,6 @@
+# Node
+node_modules/
+
 # Harness durable layer — each project instance generates its own data.
 harness.db
 harness.db-wal

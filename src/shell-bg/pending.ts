@@ -1,0 +1,96 @@
+/**
+ * The messages a backgrounded command produces — when it is sent to the
+ * background, and when it comes back.
+ *
+ * Two audiences, one hard constraint: delivery (pushing the finished result
+ * into the conversation unasked) only works if the session outlives the run.
+ * An interactive session does; a headless `pi -p` run tears down when the
+ * prompt resolves, so the not-ready message tells the truth for its mode:
+ * interactive can wait, headless must collect within the turn.
+ *
+ * Design credit: pifydev/shell-background (MIT).
+ */
+
+export interface BackgroundedInput {
+	id: string;
+	command: string;
+	elapsedMs: number;
+	/** True on the auto-threshold path, false when the caller asked for background. */
+	auto: boolean;
+	/** Whether a UI/interactive session is present to deliver into. */
+	interactive: boolean;
+	/** The tool to collect with: "shell_status". */
+	collectWith: string;
+}
+
+function elapsed(ms: number): string {
+	if (ms < 1000) return "just now";
+	const s = Math.round(ms / 1000);
+	if (s < 60) return `${s}s`;
+	return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+function clip(command: string, max = 60): string {
+	const one = command.replace(/\s+/g, " ").trim();
+	return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
+}
+
+export interface BackgroundedResult {
+	text: string;
+	details: {
+		id: string;
+		status: "running";
+		background: true;
+		auto: boolean;
+		retryable: true;
+		pollRequired: boolean;
+		elapsedMs: number;
+	};
+}
+
+export function backgroundedResult(
+	input: BackgroundedInput,
+): BackgroundedResult {
+	const head = input.auto
+		? `${input.id} is still running after ${elapsed(input.elapsedMs)} — moved to the background.`
+		: `${input.id} started in the background.`;
+	const line = `  $ ${clip(input.command)}`;
+	const tail = input.interactive
+		? [
+				"Its result is delivered here automatically when it finishes, so carry on with other",
+				`work. ${input.collectWith} with id "${input.id}" is only if you want it early, and ${input.collectWith}`,
+				"with no id lists everything still running.",
+			]
+		: [
+				"This is a headless run: nothing is delivered after your turn ends. Call",
+				`${input.collectWith} with id "${input.id}" again in this same turn until it reports finished —`,
+				"do not end your turn expecting the result to arrive on its own.",
+			];
+	return {
+		text: [head, line, "", ...tail].join("\n"),
+		details: {
+			id: input.id,
+			status: "running",
+			background: true,
+			auto: input.auto,
+			retryable: true,
+			pollRequired: !input.interactive,
+			elapsedMs: input.elapsedMs,
+		},
+	};
+}
+
+/** How a finished background job introduces itself when it arrives unasked. */
+export function deliveryMessage(id: string, body: string): string {
+	return [
+		`<shell_bg_result id="${id}">`,
+		body.trim(),
+		`</shell_bg_result>`,
+		"",
+		`This is ${id}, a command you sent to the background; it has just finished and this is its result.`,
+		"Fold it into what you are doing. If you had already moved on, say what it changes — or that it changes nothing.",
+	].join("\n");
+}
+
+/** The custom-message type a delivered result travels under. */
+export const DELIVERY_TYPE = "pi-utils-shell-bg-result";
