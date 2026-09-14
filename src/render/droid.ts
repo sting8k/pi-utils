@@ -51,6 +51,11 @@ export interface DroidRenderers {
 	) => ComponentLike;
 	clearCompactBoxedFooter: (state: unknown) => void;
 	boxedToolWidthKey: (toolName: string, detail: string) => string;
+	formatBoxedFooter: (
+		theme: unknown,
+		result: unknown,
+		extraParts?: string[],
+	) => string;
 	renderLines: (
 		theme: unknown,
 		text: string,
@@ -66,6 +71,23 @@ export function resultText(result: unknown): string {
 		?.content;
 	const first = content?.[0];
 	return typeof first?.text === "string" ? first.text : "";
+}
+
+/**
+ * Wrap an execute body with wall-time timing, stored where droid-styling's
+ * footer reads it (result.details.__elapsedMs — same key as its own
+ * wrapExecuteWithTiming). This is what makes the ◷ X.XXs metric appear in
+ * both collapsed and expanded footers.
+ */
+export async function withTiming<
+	T extends { details?: Record<string, unknown> },
+>(fn: () => Promise<T>): Promise<T> {
+	const startedAt = Date.now();
+	const result = await fn();
+	const details = (result.details ?? {}) as Record<string, unknown>;
+	details.__elapsedMs = Date.now() - startedAt;
+	result.details = details;
+	return result;
 }
 
 const DEFAULT_SPECIFIER = "@sting8k/pi-droid-styling/tool-tags/common.js";
@@ -86,6 +108,7 @@ function pick(mod: Record<string, unknown>): DroidRenderers | null {
 		"renderCompactBoxedFooter",
 		"clearCompactBoxedFooter",
 		"boxedToolWidthKey",
+		"formatBoxedFooter",
 		"renderLines",
 		"isExpanded",
 	] as const;

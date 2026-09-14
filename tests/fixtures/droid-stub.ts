@@ -27,14 +27,18 @@ export function renderCompactBoxedToolCall(
 export function renderBoxedToolResult(
 	_theme: unknown,
 	body: ((w: number) => string[]) | { render(w: number): string[] },
-	options: StubOptions = {},
+	options: StubOptions & { footerLines?: string[] } = {},
 ) {
 	return {
 		invalidate(): void {},
 		render(width: number): string[] {
 			const lines =
 				typeof body === "function" ? body(width) : body.render(width);
-			return [`[result ${options.isError ? "error" : "ok"}]`, ...lines];
+			return [
+				`[result ${options.isError ? "error" : "ok"}]`,
+				...lines,
+				...(options.footerLines ?? []),
+			];
 		},
 	};
 }
@@ -59,6 +63,16 @@ export function clearCompactBoxedFooter(state: unknown): void {
 
 export function boxedToolWidthKey(toolName: string, detail: string): string {
 	return `${toolName}:${detail}`;
+}
+
+export function formatBoxedFooter(
+	_theme: unknown,
+	result: { details?: { __elapsedMs?: number } } | undefined,
+	extraParts: string[] = [],
+): string {
+	const elapsed = result?.details?.__elapsedMs;
+	const wall = elapsed === undefined ? "--" : `${(elapsed / 1000).toFixed(2)}s`;
+	return [`◷ ${wall}`, ...extraParts].join(" · ");
 }
 
 export function renderLines(

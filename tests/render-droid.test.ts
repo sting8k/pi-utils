@@ -151,6 +151,30 @@ describe("extension re-registration with droid renderers", () => {
 		const lines = component.render(80);
 		expect(lines[0]).toContain("[call Search]");
 		expect(lines[0]).toContain("/hello/ in current directory");
+
+		// Expanded result renders the metrics footer line (elapsed from details).
+		const resultComponent = (
+			withRender?.renderResult as never as (...a: unknown[]) => {
+				render(w: number): string[];
+			}
+		)(
+			{
+				content: [
+					{
+						type: "text",
+						text: "1 matches in 1 files\na.md:1: hello render-test",
+					},
+				],
+				details: { __elapsedMs: 1500 },
+			},
+			{ expanded: true },
+			{},
+			{ state: {}, args: { pattern: "hello" } },
+		);
+		const resultLines = resultComponent.render(80);
+		expect(resultLines[0]).toBe("[result ok]");
+		expect(resultLines.join("\n")).toContain("↳ Found 1 match.");
+		expect(resultLines.join("\n")).toContain("◷ 1.50s");
 	});
 
 	test("shell-bg bash gets droid renderers after session_start", async () => {

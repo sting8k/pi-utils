@@ -43,6 +43,7 @@ import {
 import {
 	type DroidRenderers,
 	loadDroidRenderers,
+	withTiming,
 } from "../src/render/droid.ts";
 import {
 	bashRenderers,

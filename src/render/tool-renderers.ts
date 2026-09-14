@@ -72,6 +72,7 @@ export function boxedResult(
 	detail: string,
 	context: RenderResultContext,
 	maxPreviewLines = DEFAULT_PREVIEW_LINES,
+	extraParts: string[] = [],
 ): ComponentLike {
 	droid.clearCompactBoxedFooter(context.state);
 	const text = resultText(context.result).trimEnd();
@@ -96,7 +97,13 @@ export function boxedResult(
 			});
 			return body ? body.split("\n") : [];
 		},
-		{ widthKey, referenceLines: [`${title}: ${clip(detail)}`] },
+		{
+			widthKey,
+			referenceLines: [`${title}: ${clip(detail)}`],
+			footerLines: [
+				droid.formatBoxedFooter(context.theme, context.result, extraParts),
+			],
+		},
 	);
 }
 
@@ -164,6 +171,7 @@ export function grepRenderers(droid: DroidRenderers) {
 				{
 					widthKey: droid.boxedToolWidthKey("Search", d),
 					referenceLines: [`Query: ${d}`],
+					footerLines: [droid.formatBoxedFooter(theme, result)],
 				},
 			);
 		},
@@ -231,15 +239,28 @@ export function bashRenderers(droid: DroidRenderers) {
 			theme: unknown,
 			context: RenderContext,
 		) {
-			return boxedResult(droid, "Bash", String(context.args?.command ?? ""), {
-				result,
-				options,
-				theme,
-				state: context.state,
-				isError: context.isError,
-				isPartial: context.isPartial,
-				args: context.args,
-			});
+			const flags = [
+				context.args?.background === true ? "bg" : undefined,
+				context.args?.timeout !== undefined
+					? `timeout:${String(context.args.timeout)}s`
+					: undefined,
+			].filter((part): part is string => part !== undefined);
+			return boxedResult(
+				droid,
+				"Bash",
+				String(context.args?.command ?? ""),
+				{
+					result,
+					options,
+					theme,
+					state: context.state,
+					isError: context.isError,
+					isPartial: context.isPartial,
+					args: context.args,
+				},
+				DEFAULT_PREVIEW_LINES,
+				flags,
+			);
 		},
 	};
 }

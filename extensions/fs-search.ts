@@ -30,6 +30,7 @@ import { runGrep } from "../src/fs-search/grep-core.ts";
 import {
 	type DroidRenderers,
 	loadDroidRenderers,
+	withTiming,
 } from "../src/render/droid.ts";
 import {
 	droidToolRender,
@@ -152,22 +153,24 @@ export default function fsSearchExtension(pi: ExtensionAPI) {
 			},
 			...droidToolRender(droid, grepRenderers),
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-				const result = await runGrep(
-					rg(),
-					params,
-					settings.fsSearch,
-					ctx.cwd,
-					signal,
-				);
-				return {
-					content: [{ type: "text", text: result.text }],
-					details: {
-						matchCount: result.matchCount,
-						fileCount: result.fileCount,
-						matchLimitReached: result.matchLimitReached,
-						spillPath: result.spillPath,
-					},
-				};
+				return withTiming(async () => {
+					const result = await runGrep(
+						rg(),
+						params,
+						settings.fsSearch,
+						ctx.cwd,
+						signal,
+					);
+					return {
+						content: [{ type: "text" as const, text: result.text }],
+						details: {
+							matchCount: result.matchCount,
+							fileCount: result.fileCount,
+							matchLimitReached: result.matchLimitReached,
+							spillPath: result.spillPath,
+						},
+					};
+				});
 			},
 		});
 
@@ -205,17 +208,19 @@ export default function fsSearchExtension(pi: ExtensionAPI) {
 			},
 			...droidToolRender(droid, globRenderers),
 			async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-				const result = await runGlob(
-					rg(),
-					params,
-					settings.fsSearch,
-					ctx.cwd,
-					signal,
-				);
-				return {
-					content: [{ type: "text", text: result.text }],
-					details: { total: result.total, spillPath: result.spillPath },
-				};
+				return withTiming(async () => {
+					const result = await runGlob(
+						rg(),
+						params,
+						settings.fsSearch,
+						ctx.cwd,
+						signal,
+					);
+					return {
+						content: [{ type: "text" as const, text: result.text }],
+						details: { total: result.total, spillPath: result.spillPath },
+					};
+				});
 			},
 		});
 	}
