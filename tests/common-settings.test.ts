@@ -83,3 +83,54 @@ describe("loadSettings", () => {
 		expect(result.warnings[0]).toContain("not a JSON object");
 	});
 });
+
+describe("loadSettings — bashRouter (Amendment A1)", () => {
+	test("pre-amendment file without the section picks up the default silently", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			// Pre-amendment shape: fsSearch/shellBg present, bashRouter absent.
+			JSON.stringify({ fsSearch: {}, shellBg: {} }),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.bashRouter.unwrapPrefixes).toEqual(["rtk"]);
+		expect(result.warnings).toEqual([]);
+	});
+
+	test("custom whitelist is kept; empty list disables unwrap", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({
+				fsSearch: {},
+				shellBg: {},
+				bashRouter: { unwrapPrefixes: ["time", "env"] },
+			}),
+		);
+		expect(loadSettings(dir).settings.bashRouter.unwrapPrefixes).toEqual([
+			"time",
+			"env",
+		]);
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({
+				fsSearch: {},
+				shellBg: {},
+				bashRouter: { unwrapPrefixes: [] },
+			}),
+		);
+		const disabled = loadSettings(dir);
+		expect(disabled.settings.bashRouter.unwrapPrefixes).toEqual([]);
+		expect(disabled.warnings).toEqual([]);
+	});
+
+	test("invalid unwrapPrefixes warns and falls back", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({ bashRouter: { unwrapPrefixes: "rtk" } }),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.bashRouter.unwrapPrefixes).toEqual(["rtk"]);
+		expect(
+			result.warnings.some((w) => w.includes("bashRouter.unwrapPrefixes")),
+		).toBe(true);
+	});
+});

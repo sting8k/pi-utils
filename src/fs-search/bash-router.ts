@@ -335,10 +335,29 @@ function matchFind(tokens: Token[]): RoutedSearch | null {
  * Match a standalone, pure search command against the routing contract.
  * Returns grep/glob params the fs-search cores can execute 1:1, or null —
  * null always means "fall through to real bash, zero behavior change".
+ *
+ * Rule 10 (Amendment A1): `unwrapPrefixes` whitelists leading wrapper tokens
+ * (e.g. ["rtk"] for pi-ctx-kit's command rewriting). Exactly ONE leading
+ * token is stripped — before the dangerous-char scan, and itself unscanned —
+ * when it matches the whitelist exactly; rules 1-9 then apply to the
+ * remainder. Never blind-stripping: `sudo` or any unknown wrapper keeps the
+ * whole command untouched (dropping sudo would change semantics).
  */
-export function matchBashSearch(command: string): RoutedSearch | null {
-	if (METACHAR.test(command)) return null; // rule 1
-	const tokens = tokenize(command);
+export function matchBashSearch(
+	command: string,
+	unwrapPrefixes: readonly string[] = [],
+): RoutedSearch | null {
+	let effective = command;
+	if (unwrapPrefixes.length > 0) {
+		const trimmed = effective.trimStart();
+		const head = /^(\S+)(\s|$)/.exec(trimmed);
+		const headToken = head === null ? undefined : head[1];
+		if (headToken !== undefined && unwrapPrefixes.includes(headToken)) {
+			effective = trimmed.slice(headToken.length);
+		}
+	}
+	if (METACHAR.test(effective)) return null; // rule 1
+	const tokens = tokenize(effective);
 	if (!tokens) return null;
 	if (tokens.some((token) => token.text === "")) return null;
 	const head = tokens[0];

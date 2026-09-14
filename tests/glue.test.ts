@@ -354,4 +354,27 @@ describe("shell-bg glue", () => {
 		expect(asText(plain)).not.toContain("[fs-search]");
 		expect(asDetails(plain).routed).toBeUndefined();
 	});
+
+	test("wrapper-prefixed search routes via the settings whitelist (A1)", async () => {
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/shell-bg.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const bash = captured.tools.find((t) => t.name === "bash");
+		if (!bash) throw new Error("bash tool missing");
+		const result = (await bash.execute(
+			"t12",
+			{ command: "rtk rg keyword-glue" },
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as {
+			content: Array<{ type: string; text: string }>;
+			details: Record<string, unknown>;
+		};
+		expect(result.content[0]?.text).toContain(
+			"[fs-search] bash routed to grep semantics",
+		);
+		expect(result.details).toMatchObject({ routed: true, matchCount: 1 });
+	});
 });

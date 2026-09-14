@@ -29,9 +29,19 @@ export interface ShellBgSettings {
 	killGraceMs: number;
 }
 
+export interface BashRouterSettings {
+	/**
+	 * Leading wrapper tokens the bash router may strip (exactly one) before
+	 * search matching — e.g. ["rtk"] when pi-ctx-kit rewrites commands into
+	 * `rtk <command>` (US-001 Amendment A1). Unknown wrappers never strip.
+	 */
+	unwrapPrefixes: string[];
+}
+
 export interface PiUtilsSettings {
 	fsSearch: FsSearchSettings;
 	shellBg: ShellBgSettings;
+	bashRouter: BashRouterSettings;
 }
 
 export const DEFAULT_SETTINGS: PiUtilsSettings = {
@@ -48,6 +58,9 @@ export const DEFAULT_SETTINGS: PiUtilsSettings = {
 		autoBackgroundMs: 30_000,
 		tailBytes: 8192,
 		killGraceMs: 3_000,
+	},
+	bashRouter: {
+		unwrapPrefixes: ["rtk"],
 	},
 };
 
@@ -197,6 +210,24 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 		}
 	} else {
 		warnings.push('"shellBg" is not an object — using defaults');
+	}
+
+	// bashRouter (Amendment A1): sections from pre-amendment settings files are
+	// filled silently — a warning toast on every session start would be noise.
+	const brRaw = parsed.bashRouter;
+	if (brRaw !== undefined) {
+		if (!isRecord(brRaw)) {
+			warnings.push('"bashRouter" is not an object — using defaults');
+		} else if ("unwrapPrefixes" in brRaw) {
+			const value = brRaw.unwrapPrefixes;
+			if (Array.isArray(value) && value.every((v) => typeof v === "string")) {
+				settings.bashRouter.unwrapPrefixes = [...(value as string[])];
+			} else {
+				warnings.push(
+					`"bashRouter.unwrapPrefixes" invalid (${JSON.stringify(value)}) — using default`,
+				);
+			}
+		}
 	}
 
 	return { settings, warnings, created: false };

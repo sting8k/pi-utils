@@ -328,3 +328,67 @@ describe("reject matrix — extra conservative edges", () => {
 	rejects("glob value starting with dash", "rg -g -i preset");
 	rejects("unquoted brace expansion", "rg a{1,b} src");
 });
+
+describe("rule 10 — wrapper unwrap whitelist (Amendment A1)", () => {
+	const R = ["rtk"];
+
+	test("prefixed searches route with identical params to unwrapped forms", () => {
+		expect(matchBashSearch("rtk rg foo src/", R)).toEqual({
+			kind: "grep",
+			params: { pattern: "foo", path: "src/" },
+		});
+		expect(matchBashSearch("rtk rg foo src/", R)).toEqual(
+			matchBashSearch("rg foo src/"),
+		);
+		expect(matchBashSearch("rtk grep -r x .", R)).toEqual({
+			kind: "grep",
+			params: { pattern: "x", path: "." },
+		});
+		expect(matchBashSearch("rtk find . -name '*.ts'", R)).toEqual({
+			kind: "glob",
+			params: { pattern: "*.ts", path: "." },
+		});
+	});
+
+	test("unwrap never widens the matcher: -rn stays rejected", () => {
+		// The unwrapped form `grep -rn x .` rejects (combined short flags);
+		// the prefixed form is identical to it — null either way.
+		expect(matchBashSearch("grep -rn x .")).toBeNull();
+		expect(matchBashSearch("rtk grep -rn x .", R)).toBeNull();
+	});
+
+	test("sudo is never blind-stripped", () => {
+		expect(matchBashSearch("sudo grep x /root/f", R)).toBeNull();
+		expect(matchBashSearch("sudo grep x /root/f")).toBeNull();
+	});
+
+	test("exactly one unwrap: double prefix rejects", () => {
+		expect(matchBashSearch("rtk rtk rg x", R)).toBeNull();
+		expect(matchBashSearch("rtk rtk rg x")).toBeNull();
+	});
+
+	test("unknown wrapper rejects", () => {
+		expect(matchBashSearch("foo rg x", R)).toBeNull();
+	});
+
+	test("non-search after unwrap passes through to bash", () => {
+		expect(matchBashSearch("rtk read X", R)).toBeNull();
+	});
+
+	test("empty whitelist = current behavior", () => {
+		expect(matchBashSearch("rtk rg foo", [])).toBeNull();
+		expect(matchBashSearch("rtk rg foo")).toBeNull();
+	});
+
+	test("rules 1-9 still apply to the remainder", () => {
+		expect(matchBashSearch("rtk rg foo | head", R)).toBeNull();
+		expect(matchBashSearch("rtk rg 'cost$'", R)).toBeNull();
+		expect(matchBashSearch("rtk rg", R)).toBeNull(); // no pattern
+		expect(matchBashSearch("rtk rg a=b", R)).toBeNull();
+	});
+
+	test("exact token match only", () => {
+		expect(matchBashSearch("rtkx rg foo", R)).toBeNull();
+		expect(matchBashSearch('"rtk" rg foo', R)).toBeNull();
+	});
+});

@@ -358,7 +358,10 @@ export default function shellBackground(pi: ExtensionAPI) {
 		// only for plain foreground calls without a timeout, which keep no job
 		// lifecycle. Anything the matcher cannot prove 1:1 falls through.
 		if (!params.background && params.timeout === undefined) {
-			const routed = matchBashSearch(command);
+			const routed = matchBashSearch(
+				command,
+				settings.bashRouter.unwrapPrefixes,
+			);
 			if (routed) return routedResult(routed, ctx, signal);
 		}
 

@@ -7,7 +7,7 @@ Utility extensions for the [Pi coding agent](https://github.com/earendil-works/p
 - `grep` (overrides the built-in): streaming ripgrep search over hidden **and** gitignored files by default, `--no-config` hardening, a cooperative 30s timeout, and match/byte caps with spill files for the full output
 - `glob` (new tool): find files by name pattern at any depth, sorted by modification time with the most recently changed files last, includes gitignored files
 - `bash` (overrides the built-in): commands still running after 30s auto-move to the background, `background: true` starts detached immediately, `timeout: N` kills the whole process tree
-- `bash` search auto-routing: standalone `rg` / `grep` / `find` commands run on the fs-search cores (caps, spill files, formatted rows) instead of a raw shell — anything the matcher cannot prove 1:1 falls through to bash unchanged
+- `bash` search auto-routing: standalone `rg` / `grep` / `find` commands run on the fs-search cores (caps, spill files, formatted rows) instead of a raw shell — anything the matcher cannot prove 1:1 falls through to bash unchanged. A wrapper whitelist (`bashRouter.unwrapPrefixes`, default `["rtk"]`) also routes prefixed commands like `rtk rg …` (pi-ctx-kit rewriting); unknown wrappers like `sudo` never strip
 - `shell_status` / `shell_kill`: poll, list, and stop background jobs; finished results are delivered into the conversation automatically
 - `/shell-bg` command and a live widget above the editor showing running jobs
 - One settings file, `~/.pi/agent/pi-utils.json`, auto-scaffolded with defaults on first run
@@ -133,6 +133,9 @@ All settings live in `~/.pi/agent/pi-utils.json` — created with these defaults
     "autoBackgroundMs": 30000,
     "tailBytes": 8192,
     "killGraceMs": 3000
+  },
+  "bashRouter": {
+    "unwrapPrefixes": ["rtk"]
   }
 }
 ```
