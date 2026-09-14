@@ -72,6 +72,16 @@ describe("grepMatchCount", () => {
 });
 
 describe("extension re-registration with droid renderers", () => {
+	/** Guarded cast: the renderer must exist by the time we call it. */
+	function asRenderer(
+		value: unknown,
+	): (...a: unknown[]) => { render(w: number): string[] } {
+		if (typeof value !== "function") throw new Error("renderer missing");
+		return value as never as (...a: unknown[]) => {
+			render(w: number): string[];
+		};
+	}
+
 	function fakePi() {
 		const tools: Array<Record<string, unknown>> = [];
 		const handlers = new Map<
@@ -143,21 +153,17 @@ describe("extension re-registration with droid renderers", () => {
 		expect(typeof withRender?.renderCall).toBe("function");
 		expect(typeof withRender?.renderResult).toBe("function");
 
-		const component = (
-			withRender?.renderCall as never as (...a: unknown[]) => {
-				render(w: number): string[];
-			}
-		)({ pattern: "hello" }, {}, { state: {} });
+		const component = asRenderer(withRender?.renderCall)(
+			{ pattern: "hello" },
+			{},
+			{ state: {} },
+		);
 		const lines = component.render(80);
 		expect(lines[0]).toContain("[call Search]");
 		expect(lines[0]).toContain("/hello/ in current directory");
 
 		// Expanded result renders the metrics footer line (elapsed from details).
-		const resultComponent = (
-			withRender?.renderResult as never as (...a: unknown[]) => {
-				render(w: number): string[];
-			}
-		)(
+		const resultComponent = asRenderer(withRender?.renderResult)(
 			{
 				content: [
 					{
@@ -189,11 +195,11 @@ describe("extension re-registration with droid renderers", () => {
 		}
 		const bash = tools.filter((t) => t.name === "bash").at(-1);
 		expect(typeof bash?.renderCall).toBe("function");
-		const component = (
-			bash?.renderCall as never as (...a: unknown[]) => {
-				render(w: number): string[];
-			}
-		)({ command: "npm run build", background: true }, {}, { state: {} });
+		const component = asRenderer(bash?.renderCall)(
+			{ command: "npm run build", background: true },
+			{},
+			{ state: {} },
+		);
 		const lines = component.render(80);
 		expect(lines[0]).toContain("[call Bash]");
 		expect(lines[0]).toContain("npm run build");

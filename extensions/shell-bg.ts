@@ -368,7 +368,9 @@ export default function shellBackground(pi: ExtensionAPI) {
 				),
 			}),
 			async execute(_toolCallId, params, signal, onUpdate, ctx) {
-				return runBash(params, signal, onUpdate as never, ctx);
+				return withTiming(() =>
+					runBash(params, signal, onUpdate as never, ctx),
+				);
 			},
 			...droidToolRender(droid, bashRenderers),
 		});
