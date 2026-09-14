@@ -55,6 +55,7 @@ import {
 	formatResult,
 	formatSnapshot,
 	type WidgetModel,
+	type WidgetRow,
 	widgetModel,
 } from "../src/shell-bg/format.ts";
 import { killTree } from "../src/shell-bg/kill.ts";
@@ -114,24 +115,29 @@ export default function shellBackground(pi: ExtensionAPI) {
 		return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
 	}
 
-	/** Paint the model in the pi-tasks idiom: accent header, one line per job. */
+	/** Paint the model: header at column 0, tree connectors └─/├─ down the jobs. */
 	function paintWidget(
 		model: WidgetModel,
 		theme: WidgetTheme,
 		width: number,
 	): string[] {
 		const lines = [
-			`   ${theme.fg("accent", theme.bold("Jobs"))}${theme.fg("dim", ` · ${model.running} running`)}`,
+			`${theme.fg("accent", theme.bold("Jobs"))}${theme.fg("dim", ` · ${model.running} running`)}`,
 		];
-		for (const row of model.rows) {
+		const rows: Array<WidgetRow | null> = [...model.rows];
+		if (model.hidden > 0) rows.push(null); // sentinel: the ⋯ row is a row too
+		for (const [index, row] of rows.entries()) {
+			const isLast = index === rows.length - 1;
+			const branch = theme.fg("dim", isLast ? "└─ " : "├─ ");
+			if (!row) {
+				lines.push(`${branch}${theme.fg("dim", `⋯ and ${model.hidden} more`)}`);
+				continue;
+			}
 			const id = theme.fg("dim", row.id.padEnd(6));
 			const auto = row.auto ? theme.fg("dim", " (auto)") : "";
-			const cmd = clipPlain(row.command, Math.max(12, width - 24));
+			const cmd = clipPlain(row.command, Math.max(12, width - 20));
 			const meta = theme.fg("dim", ` · ${row.elapsedText}`);
-			lines.push(`   ${theme.fg("accent", "●")} ${id} ${cmd}${meta}${auto}`);
-		}
-		if (model.hidden > 0) {
-			lines.push(`   ${theme.fg("dim", `⋯ and ${model.hidden} more`)}`);
+			lines.push(`${branch}${id} ${cmd}${meta}${auto}`);
 		}
 		return lines;
 	}
