@@ -113,7 +113,7 @@ In interactive sessions, finished jobs deliver themselves into the conversation 
 /shell-bg kill bg-2          # same as shell_kill
 ```
 
-A widget above the editor shows each running job's header and latest output line while it works.
+A widget above the editor lists running jobs — one line per job (`• Jobs · N running`, tree connectors, live elapsed) — and clears itself when the last job settles.
 
 ## Styling: droid-styling adaptation
 
