@@ -34,7 +34,7 @@ import {
 	getAgentDir,
 	getShellConfig,
 } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
 	DEFAULT_SETTINGS,
@@ -110,10 +110,24 @@ export default function shellBackground(pi: ExtensionAPI) {
 		bold(text: string): string;
 	};
 
+	/** Row budget per droid-styling's reasonix rows: 80% of width (full width
+	 * only under 40 cols) — rows stay airy, off the terminal edge. */
+	const ROW_MIN_WIDTH = 40;
+	const ROW_WIDTH_RATIO = 0.8;
+
+	function rowWidth(width: number): number {
+		const available = Math.max(1, Math.floor(width));
+		return available <= ROW_MIN_WIDTH
+			? available
+			: Math.floor(available * ROW_WIDTH_RATIO);
+	}
+
 	/** Paint the model: mirrors a transcript tool row — small marker at col 0,
 	 * "Jobs" lands on col 2 where tool names render (reasonix "✓ ToolName …") —
-	 * with branch rows one level deeper. Command clipping is display-width
-	 * aware (pi-tui truncateToWidth) with an exact per-row cell budget. */
+	 * with branch rows one level deeper. Clipping follows droid's row mechanism:
+	 * meta (right part) is measured first and never clipped; the command gets
+	 * what remains, truncated display-width aware and padded to its budget so
+	 * meta lands on the same column in every row. */
 	function paintWidget(
 		model: WidgetModel,
 		theme: WidgetTheme,
@@ -134,15 +148,17 @@ export default function shellBackground(pi: ExtensionAPI) {
 				continue;
 			}
 			const id = theme.fg("dim", row.id.padEnd(6));
-			// Exact cell budget: prefix (indent+branch+id+space = 14 cells) + meta
-			// measured before theming; truncateToWidth keeps CJK double-width honest.
-			const meta = ` · ${row.elapsedText}${row.auto ? " (auto)" : ""}`;
-			const budget = Math.max(12, width - 14 - meta.length);
-			const cmd = truncateToWidth(
-				row.command.replace(/\s+/g, " ").trim(),
-				budget,
-			);
-			lines.push(`    ${branch}${id} ${cmd}${theme.fg("dim", meta)}`);
+			// Droid's split: meta (right) measured first and never clipped; the
+			// command gets what remains of the row budget, truncated display-width
+			// aware (dim ellipsis) and padded to that budget so meta aligns on the
+			// same column in every row. Prefix = indent + branch + id + space.
+			const meta = `· ${row.elapsedText}${row.auto ? " (auto)" : ""}`;
+			const metaWidth = visibleWidth(meta);
+			const budget = Math.max(12, rowWidth(width) - 14 - metaWidth);
+			const normalized = row.command.replace(/[\t\n\v\f\r]+/g, " ").trim();
+			const cmd = truncateToWidth(normalized, budget, theme.fg("dim", " …"));
+			const pad = " ".repeat(Math.max(0, budget - visibleWidth(cmd)));
+			lines.push(`    ${branch}${id} ${cmd}${pad} ${theme.fg("dim", meta)}`);
 		}
 		return lines;
 	}
