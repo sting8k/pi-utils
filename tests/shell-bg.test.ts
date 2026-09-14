@@ -3,7 +3,12 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { formatList, header } from "../src/shell-bg/format.ts";
+import {
+	formatList,
+	header,
+	MAX_WIDGET_ROWS,
+	widgetModel,
+} from "../src/shell-bg/format.ts";
 import {
 	backgroundedResult,
 	DELIVERY_TYPE,
@@ -160,5 +165,70 @@ describe("pending messages", () => {
 		]);
 		expect(list).toContain("bg-1 · running");
 		expect(list).toContain("bg-2 · failed · exit 1 · delivered");
+	});
+});
+
+describe("widgetModel", () => {
+	const now = 1_000_000;
+	function runningJob(id: string, startedAt: number, auto = false): Job {
+		return {
+			id,
+			command: `echo ${id}`,
+			cwd: "/tmp",
+			pid: 123,
+			status: "running",
+			exitCode: null,
+			signal: null,
+			logPath: "/dev/null",
+			startedAt,
+			endedAt: null,
+			auto,
+			delivered: false,
+		};
+	}
+	function finishedJob(id: string): Job {
+		return {
+			...runningJob(id, now - 1000),
+			status: "done",
+			exitCode: 0,
+			endedAt: now,
+			delivered: true,
+		};
+	}
+
+	test("only running jobs appear, elapsed relative to now", () => {
+		const model = widgetModel(
+			[
+				finishedJob("bg-1"),
+				runningJob("bg-2", now - 65_000),
+				runningJob("bg-3", now - 2_000),
+			],
+			now,
+		);
+		expect(model.running).toBe(2);
+		expect(model.hidden).toBe(0);
+		expect(model.rows.map((r) => r.id)).toEqual(["bg-2", "bg-3"]);
+		expect(model.rows[0]?.elapsedText).toBe("1m 5s");
+		expect(model.rows[1]?.elapsedText).toBe("2s");
+	});
+
+	test("rows cap at MAX_WIDGET_ROWS; the rest collapse into hidden", () => {
+		const jobs = Array.from({ length: MAX_WIDGET_ROWS + 3 }, (_, i) =>
+			runningJob(`bg-${i + 1}`, now),
+		);
+		const model = widgetModel(jobs, now);
+		expect(model.running).toBe(MAX_WIDGET_ROWS + 3);
+		expect(model.rows).toHaveLength(MAX_WIDGET_ROWS);
+		expect(model.hidden).toBe(3);
+	});
+
+	test("empty model clears the widget", () => {
+		expect(widgetModel([], now)).toEqual({ running: 0, rows: [], hidden: 0 });
+		expect(widgetModel([finishedJob("bg-1")], now).running).toBe(0);
+	});
+
+	test("auto flag survives into rows", () => {
+		const model = widgetModel([runningJob("bg-9", now - 31_000, true)], now);
+		expect(model.rows[0]?.auto).toBe(true);
 	});
 });

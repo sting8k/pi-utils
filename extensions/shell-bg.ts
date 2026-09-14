@@ -54,7 +54,8 @@ import {
 	formatList,
 	formatResult,
 	formatSnapshot,
-	widgetLines,
+	type WidgetModel,
+	widgetModel,
 } from "../src/shell-bg/format.ts";
 import { killTree } from "../src/shell-bg/kill.ts";
 import {
@@ -84,6 +85,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 	let settings: PiUtilsSettings = DEFAULT_SETTINGS;
 	let registry: JobRegistry | null = null;
 	let lastUiCtx: ExtensionContext | null = null;
+	let widgetTimer: ReturnType<typeof setInterval> | null = null;
 
 	function sessionKey(cwd: string): string {
 		const id = process.env.PI_SESSION_ID;
@@ -100,18 +102,69 @@ export default function shellBackground(pi: ExtensionAPI) {
 		return { shell: cfg.shell, args };
 	}
 
+	/** Structural slice of pi's Theme — only what the widget paints with. */
+	type WidgetTheme = {
+		fg(color: string, text: string): string;
+		bold(text: string): string;
+	};
+
+	/** Plain-text clip; commands and tails are clipped before theming so ANSI codes are never cut. */
+	function clipPlain(text: string, max: number): string {
+		const one = text.replace(/\s+/g, " ").trim();
+		return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
+	}
+
+	/** Paint the model in the pi-tasks idiom: accent header, one line per job. */
+	function paintWidget(
+		model: WidgetModel,
+		theme: WidgetTheme,
+		width: number,
+	): string[] {
+		const lines = [
+			`   ${theme.fg("accent", theme.bold("Jobs"))}${theme.fg("dim", ` · ${model.running} running`)}`,
+		];
+		for (const row of model.rows) {
+			const id = theme.fg("dim", row.id.padEnd(6));
+			const auto = row.auto ? theme.fg("dim", " (auto)") : "";
+			const cmd = clipPlain(row.command, Math.max(12, width - 24));
+			const meta = theme.fg("dim", ` · ${row.elapsedText}`);
+			lines.push(`   ${theme.fg("accent", "●")} ${id} ${cmd}${meta}${auto}`);
+		}
+		if (model.hidden > 0) {
+			lines.push(`   ${theme.fg("dim", `⋯ and ${model.hidden} more`)}`);
+		}
+		return lines;
+	}
+
+	function stopWidgetTick(): void {
+		if (widgetTimer) {
+			clearInterval(widgetTimer);
+			widgetTimer = null;
+		}
+	}
+
 	function renderWidget(ctx: ExtensionContext | null = lastUiCtx): void {
 		if (!ctx?.hasUI || !registry) return;
 		lastUiCtx = ctx;
-		void widgetLines(registry.all(), settings.shellBg.tailBytes).then(
-			(lines) => {
-				if (lines.length === 0) {
-					ctx.ui.setWidget(WIDGET, undefined);
-					return;
-				}
-				ctx.ui.setWidget(WIDGET, lines, { placement: "aboveEditor" });
-			},
+		const model = widgetModel(registry.all());
+		if (model.running === 0) {
+			ctx.ui.setWidget(WIDGET, undefined);
+			stopWidgetTick();
+			return;
+		}
+		ctx.ui.setWidget(
+			WIDGET,
+			(_tui, theme) => ({
+				invalidate(): void {},
+				render: (width: number) =>
+					paintWidget(model, theme as WidgetTheme, width),
+			}),
+			{ placement: "aboveEditor" },
 		);
+		// Elapsed refreshes while jobs run; the tick stops with the last one.
+		if (widgetTimer === null) {
+			widgetTimer = setInterval(() => renderWidget(), 1000);
+		}
 	}
 
 	function snapshot(job: Job): Promise<ToolResult> {
@@ -138,6 +191,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
+		stopWidgetTick();
 		if (!registry) return;
 		for (const job of registry.running()) {
 			job.killedByUs = true;

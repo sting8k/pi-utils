@@ -70,20 +70,38 @@ export function formatList(jobs: Job[], now = Date.now()): string {
 		.join("\n");
 }
 
-/** Widget lines: only running jobs; cleared when the last one settles. */
-export async function widgetLines(
-	jobs: Job[],
-	tailBytes: number,
-): Promise<string[]> {
+/** Running jobs capped for the widget; extras collapse into a "⋯ and N more" row. */
+export const MAX_WIDGET_ROWS = 5;
+
+export interface WidgetRow {
+	id: string;
+	/** Raw command; the painter normalizes whitespace and clips to width. */
+	command: string;
+	elapsedText: string;
+	auto: boolean;
+}
+
+/** Pure data for the above-editor widget; painting (theme/width) is the caller's. */
+export interface WidgetModel {
+	running: number;
+	rows: WidgetRow[];
+	/** Running jobs hidden by MAX_WIDGET_ROWS. */
+	hidden: number;
+}
+
+/** Model of running jobs only; an empty model clears the widget. Sync: one
+ * line per job keeps the widget stateless to refresh each tick. */
+export function widgetModel(jobs: Job[], now = Date.now()): WidgetModel {
 	const running = jobs.filter((job) => job.status === "running");
-	const lines: string[] = [];
-	for (const job of running) {
-		const tail = await readTail(job.logPath, tailBytes);
-		const lastLine =
-			tail.text.replace(/\n+$/, "").split("\n").filter(Boolean).pop() ??
-			"(no output yet)";
-		lines.push(`${header(job)}`);
-		lines.push(`  ${lastLine.slice(0, 120)}`);
-	}
-	return lines;
+	const visible = running.slice(0, MAX_WIDGET_ROWS);
+	return {
+		running: running.length,
+		rows: visible.map((job) => ({
+			id: job.id,
+			command: job.command,
+			elapsedText: elapsed(now - job.startedAt),
+			auto: job.auto,
+		})),
+		hidden: running.length - visible.length,
+	};
 }
