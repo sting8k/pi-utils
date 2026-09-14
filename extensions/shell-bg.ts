@@ -41,6 +41,15 @@ import {
 	type PiUtilsSettings,
 } from "../src/common/settings.ts";
 import {
+	type DroidRenderers,
+	loadDroidRenderers,
+} from "../src/render/droid.ts";
+import {
+	bashRenderers,
+	droidToolRender,
+	simpleRenderers,
+} from "../src/render/tool-renderers.ts";
+import {
 	formatList,
 	formatResult,
 	formatSnapshot,
@@ -122,6 +131,9 @@ export default function shellBackground(pi: ExtensionAPI) {
 		);
 		registry.load();
 		renderWidget(ctx);
+		// Adapt to @sting8k/pi-droid-styling when present (see render/droid.ts).
+		const droid = await loadDroidRenderers();
+		if (droid) registerTools(droid);
 	});
 
 	pi.on("session_shutdown", async () => {
@@ -324,110 +336,118 @@ export default function shellBackground(pi: ExtensionAPI) {
 		}
 	}
 
-	pi.registerTool({
-		name: "bash",
-		label: "bash",
-		description:
-			"Execute a bash command (pi-utils shell-bg override: same shell, cwd, env). Foreground commands " +
-			"still running after 30s auto-move to the background in interactive sessions — the tool returns " +
-			"a job id and the result is delivered into the conversation when it finishes. Pass " +
-			"background:true to start detached immediately; timeout:N (seconds) kills the whole process " +
-			"tree. Manage jobs with shell_status / shell_kill.",
-		promptSnippet:
-			"Run bash; long or background:true commands return a job id (collect via shell_status)",
-		promptGuidelines: [
-			"Use bash normally for quick commands; for long-running ones (builds, dev servers) pass background:true and collect with shell_status.",
-		],
-		parameters: Type.Object({
-			command: Type.String({ description: "Bash command to execute" }),
-			timeout: Type.Optional(
-				Type.Number({
-					description:
-						"Timeout in seconds — the whole process tree is killed past it",
-				}),
-			),
-			background: Type.Optional(
-				Type.Boolean({
-					description:
-						"Launch detached in the background; returns a job id immediately (result delivered when done; use shell_status to poll)",
-				}),
-			),
-		}),
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			return runBash(params, signal, onUpdate as never, ctx);
-		},
-	});
+	function registerTools(droid: DroidRenderers | null): void {
+		pi.registerTool({
+			name: "bash",
+			label: "bash",
+			description:
+				"Execute a bash command (pi-utils shell-bg override: same shell, cwd, env). Foreground commands " +
+				"still running after 30s auto-move to the background in interactive sessions — the tool returns " +
+				"a job id and the result is delivered into the conversation when it finishes. Pass " +
+				"background:true to start detached immediately; timeout:N (seconds) kills the whole process " +
+				"tree. Manage jobs with shell_status / shell_kill.",
+			promptSnippet:
+				"Run bash; long or background:true commands return a job id (collect via shell_status)",
+			promptGuidelines: [
+				"Use bash normally for quick commands; for long-running ones (builds, dev servers) pass background:true and collect with shell_status.",
+			],
+			parameters: Type.Object({
+				command: Type.String({ description: "Bash command to execute" }),
+				timeout: Type.Optional(
+					Type.Number({
+						description:
+							"Timeout in seconds — the whole process tree is killed past it",
+					}),
+				),
+				background: Type.Optional(
+					Type.Boolean({
+						description:
+							"Launch detached in the background; returns a job id immediately (result delivered when done; use shell_status to poll)",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params, signal, onUpdate, ctx) {
+				return runBash(params, signal, onUpdate as never, ctx);
+			},
+			...droidToolRender(droid, bashRenderers),
+		});
 
-	pi.registerTool({
-		name: "shell_status",
-		label: "Shell status",
-		description:
-			"Check a background shell job: with id, returns its status and output so far (or its final " +
-			"result once finished); without id, lists every background job this session.",
-		promptSnippet: "Poll or collect background bash jobs; no id lists them all",
-		parameters: Type.Object({
-			id: Type.Optional(
-				Type.String({
-					description: 'Job id, e.g. "bg-1" (omit to list all jobs)',
-				}),
-			),
-		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			if (!registry)
-				throw new Error("shell-bg not initialized (no session yet)");
-			if (params.id === undefined) {
-				return {
-					content: [{ type: "text", text: formatList(registry.all()) }],
-					details: {},
-				};
-			}
-			const job = registry.get(params.id);
-			if (!job) throw new Error(`Unknown background job: ${params.id}`);
-			if (job.status === "running") {
-				const text = await formatSnapshot(job, settings.shellBg.tailBytes);
+		pi.registerTool({
+			name: "shell_status",
+			label: "Shell status",
+			description:
+				"Check a background shell job: with id, returns its status and output so far (or its final " +
+				"result once finished); without id, lists every background job this session.",
+			promptSnippet:
+				"Poll or collect background bash jobs; no id lists them all",
+			parameters: Type.Object({
+				id: Type.Optional(
+					Type.String({
+						description: 'Job id, e.g. "bg-1" (omit to list all jobs)',
+					}),
+				),
+			}),
+			async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+				if (!registry)
+					throw new Error("shell-bg not initialized (no session yet)");
+				if (params.id === undefined) {
+					return {
+						content: [{ type: "text", text: formatList(registry.all()) }],
+						details: {},
+					};
+				}
+				const job = registry.get(params.id);
+				if (!job) throw new Error(`Unknown background job: ${params.id}`);
+				if (job.status === "running") {
+					const text = await formatSnapshot(job, settings.shellBg.tailBytes);
+					return {
+						content: [{ type: "text", text }],
+						details: { id: job.id, status: job.status },
+					};
+				}
+				const text = await formatResult(job, settings.shellBg.tailBytes);
 				return {
 					content: [{ type: "text", text }],
-					details: { id: job.id, status: job.status },
+					details: { id: job.id, status: job.status, exitCode: job.exitCode },
+					isError: job.status === "failed",
 				};
-			}
-			const text = await formatResult(job, settings.shellBg.tailBytes);
-			return {
-				content: [{ type: "text", text }],
-				details: { id: job.id, status: job.status, exitCode: job.exitCode },
-				isError: job.status === "failed",
-			};
-		},
-	});
+			},
+			...droidToolRender(droid, simpleRenderers("Shell status")),
+		});
 
-	pi.registerTool({
-		name: "shell_kill",
-		label: "Shell kill",
-		description: "Stop a background shell job and its whole process tree.",
-		promptSnippet: "Kill a background bash job by id",
-		parameters: Type.Object({
-			id: Type.String({ description: 'Job id, e.g. "bg-1"' }),
-		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			if (!registry)
-				throw new Error("shell-bg not initialized (no session yet)");
-			const job = registry.get(params.id);
-			if (!job) throw new Error(`Unknown background job: ${params.id}`);
-			if (job.status !== "running") {
+		pi.registerTool({
+			name: "shell_kill",
+			label: "Shell kill",
+			description: "Stop a background shell job and its whole process tree.",
+			promptSnippet: "Kill a background bash job by id",
+			parameters: Type.Object({
+				id: Type.String({ description: 'Job id, e.g. "bg-1"' }),
+			}),
+			async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+				if (!registry)
+					throw new Error("shell-bg not initialized (no session yet)");
+				const job = registry.get(params.id);
+				if (!job) throw new Error(`Unknown background job: ${params.id}`);
+				if (job.status !== "running") {
+					return {
+						content: [
+							{ type: "text", text: `${job.id} already ${job.status}.` },
+						],
+						details: { id: job.id, status: job.status },
+					};
+				}
+				job.killedByUs = true;
+				killTree(job.pid, settings.shellBg.killGraceMs);
 				return {
-					content: [{ type: "text", text: `${job.id} already ${job.status}.` }],
-					details: { id: job.id, status: job.status },
+					content: [
+						{ type: "text", text: `Killed ${job.id} and its process tree.` },
+					],
+					details: { id: job.id, status: "killed" },
 				};
-			}
-			job.killedByUs = true;
-			killTree(job.pid, settings.shellBg.killGraceMs);
-			return {
-				content: [
-					{ type: "text", text: `Killed ${job.id} and its process tree.` },
-				],
-				details: { id: job.id, status: "killed" },
-			};
-		},
-	});
+			},
+			...droidToolRender(droid, simpleRenderers("Shell kill")),
+		});
+	}
 
 	pi.registerCommand("shell-bg", {
 		description: "List background shell jobs; '/shell-bg kill <id>' stops one",
@@ -452,4 +472,6 @@ export default function shellBackground(pi: ExtensionAPI) {
 			ctx.ui.notify(formatList(registry.all()), "info");
 		},
 	});
+
+	registerTools(null);
 }

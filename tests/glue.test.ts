@@ -83,12 +83,16 @@ beforeAll(async () => {
 	agentDir = mkdtempSync(join(tmpdir(), "pi-utils-agentdir-"));
 	process.env.PI_CODING_AGENT_DIR = agentDir;
 	process.env.PI_SESSION_ID = "pi-utils-tests";
+	// Never import the real droid-styling here: pin an unresolvable module so
+	// session_start's loadDroidRenderers() fails fast (default-rendering path).
+	process.env.PI_UTILS_DROID_MODULE = "./__pi_utils_no_droid__.ts";
 	root = mkdtempSync(join(tmpdir(), "pi-utils-glue-"));
 	writeFileSync(join(root, "readme.md"), "# glue\nkeyword-glue here\n");
 });
 afterAll(() => {
 	delete process.env.PI_CODING_AGENT_DIR;
 	delete process.env.PI_SESSION_ID;
+	delete process.env.PI_UTILS_DROID_MODULE;
 	rmSync(agentDir, { recursive: true, force: true });
 	rmSync(root, { recursive: true, force: true });
 });

@@ -115,6 +115,14 @@ In interactive sessions, finished jobs deliver themselves into the conversation 
 
 A widget above the editor shows each running job's header and latest output line while it works.
 
+## Styling: droid-styling adaptation
+
+When [`@sting8k/pi-droid-styling`](https://www.npmjs.com/package/@sting8k/pi-droid-styling) is present, all five tools render in its boxed style automatically — pi-utils borrows its renderer primitives at session start, so colors, width, and expand behavior follow your droid-styling config. Without it, pi's default tool rendering is used. No hard dependency either way:
+
+- both installed via `pi install npm:` → resolves automatically (flat `~/.pi/agent/npm/node_modules`)
+- developing side by side → `devDependencies` `"file:../pi-droid-styling"` symlink (already configured here)
+- any other setup → default rendering, everything else works unchanged
+
 ## Settings
 
 All settings live in `~/.pi/agent/pi-utils.json` — created with these defaults on first start. Missing keys are filled in-memory without rewriting your edits; a broken file falls back to defaults with a warning toast:
