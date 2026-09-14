@@ -115,14 +115,15 @@ export default function shellBackground(pi: ExtensionAPI) {
 		return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
 	}
 
-	/** Paint the model: header at column 0, branch rows indented one level. */
+	/** Paint the model: header at col 2 (aligns with the transcript's tool names —
+	 * reasonix rows render "✓ ToolName …"), branches one level deeper. */
 	function paintWidget(
 		model: WidgetModel,
 		theme: WidgetTheme,
 		width: number,
 	): string[] {
 		const lines = [
-			`${theme.fg("accent", theme.bold("Jobs"))}${theme.fg("dim", ` · ${model.running} running`)}`,
+			`  ${theme.fg("accent", theme.bold("Jobs"))}${theme.fg("dim", ` · ${model.running} running`)}`,
 		];
 		const rows: Array<WidgetRow | null> = [...model.rows];
 		if (model.hidden > 0) rows.push(null); // sentinel: the ⋯ row is a row too
@@ -131,7 +132,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 			const branch = theme.fg("dim", isLast ? "└─ " : "├─ ");
 			if (!row) {
 				lines.push(
-					`  ${branch}${theme.fg("dim", `⋯ and ${model.hidden} more`)}`,
+					`    ${branch}${theme.fg("dim", `⋯ and ${model.hidden} more`)}`,
 				);
 				continue;
 			}
@@ -139,7 +140,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 			const auto = row.auto ? theme.fg("dim", " (auto)") : "";
 			const cmd = clipPlain(row.command, Math.max(12, width - 20));
 			const meta = theme.fg("dim", ` · ${row.elapsedText}`);
-			lines.push(`  ${branch}${id} ${cmd}${meta}${auto}`);
+			lines.push(`    ${branch}${id} ${cmd}${meta}${auto}`);
 		}
 		return lines;
 	}
