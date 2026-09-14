@@ -115,15 +115,16 @@ export default function shellBackground(pi: ExtensionAPI) {
 		return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
 	}
 
-	/** Paint the model: header at col 2 (aligns with the transcript's tool names —
-	 * reasonix rows render "✓ ToolName …"), branches one level deeper. */
+	/** Paint the model: mirrors a transcript tool row — small marker at col 0,
+	 * "Jobs" lands on col 2 where tool names render (reasonix "✓ ToolName …") —
+	 * with branch rows one level deeper. */
 	function paintWidget(
 		model: WidgetModel,
 		theme: WidgetTheme,
 		width: number,
 	): string[] {
 		const lines = [
-			`  ${theme.fg("accent", theme.bold("Jobs"))}${theme.fg("dim", ` · ${model.running} running`)}`,
+			`${theme.fg("accent", "•")} ${theme.fg("accent", theme.bold("Jobs"))}${theme.fg("dim", ` · ${model.running} running`)}`,
 		];
 		const rows: Array<WidgetRow | null> = [...model.rows];
 		if (model.hidden > 0) rows.push(null); // sentinel: the ⋯ row is a row too
