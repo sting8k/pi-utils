@@ -43,6 +43,10 @@ jobs:
         with:
           bun-version: latest
 
+      # fs-search tests exercise the real ripgrep binary (resolver: PATH first).
+      - name: Install ripgrep
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ripgrep
+
       - name: Install
         working-directory: pi-utils
         run: bun install
