@@ -132,10 +132,10 @@ Out of scope:
   routed execution returns note-prefixed text + `details.routed`.
 - Zero behavior change when matcher returns null (unchanged code path).
 - Amendment A1: with `unwrapPrefixes: ["rtk"]`, `bash: rg <pattern> <path>`
-  on a machine with the rtk rewriter active returns the routed note (the
-  live smoke that failed on 2026-09-14). Unwrap matrix tested: prefixed
-  searches route; `sudo ...`, double-prefix, unknown wrapper, `rtk read`, and
-  empty-list configs all stay null.
+  on a machine with the rtk rewriter active returns the routed note — this
+  live smoke failed pre-A1 on 2026-09-14, passed after A1 + reload. Unwrap
+  matrix tested: prefixed searches route; `sudo ...`, double-prefix, unknown
+  wrapper, `rtk read`, and empty-list configs all stay null.
 - Decision 0012 written; README bullet added; pushed; CI green.
 
 ## Validation
@@ -153,16 +153,17 @@ Out of scope:
 - None — semantics settled in design discussion (2026-09-14); do not widen the
   matcher without a new owner decision.
 
-- OWNER DECISION PENDING (information loss, not just cosmetic; out of
-  pi-utils scope): pi-ctx-kit's `tool_result` filter (`searchResultGrouping`
-  on `isSearchCommand`) rebuilds routed output from parsed `file:line:`
-  rows ONLY — verified against rtk/techniques/search.ts (2026-09-14):
-  (a) non-matching lines are dropped, losing the `[fs-search] routed` note
-  (incl. the hidden+gitignored superset disclosure) and the footer spill
-  path — full-output recovery degrades to re-running the search;
-  (b) double capping: router caps at 250 matches / 50KB, then rtk shows
-  50 results, 10/file, 70 chars/row; (c) 10KB middle-truncate safety net
-  can cut capped output further. Row data itself is never corrupted.
-  Cleanest fixes are on the pi-ctx-kit side: skip filtering when the
-  `[fs-search] routed` marker is present, or disable searchResultGrouping.
-  Packet records it; pi-utils does not touch pi-ctx-kit.
+- RESOLVED (2026-09-14, same session as the smoke — fixed on the pi-ctx-kit
+  side as recommended, nothing changed in pi-utils): the information loss
+  described above was real and is now fixed in pi-ctx-kit by three commits:
+  a53b895 (filterBash early-returns untouched when output starts with the
+  `[fs-search] bash routed` marker — grouping AND the truncate safety net
+  both skipped), 849ce28 (formatting restore), and 7d20189 (filterGrep passes
+  through grep tool results whose `details` match the fs-search shape
+  `{ matchCount: number, matchLimitReached: boolean, spillPath }` — a shape
+  pi's native GrepToolDetails never has; native/unknown results keep grouping,
+  tested both ways). Live-verified after reload: routed bash results keep
+  note + rows + spill footer; grep tool results (138 matches / 16 files)
+  render as full fs-search rows instead of `N matches in M files`.
+  Search-output optimization is now owned solely by fs-search (caps + spill
+  + row format); rtk keeps optimizing everything else.
