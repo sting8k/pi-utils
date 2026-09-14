@@ -115,7 +115,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 		return one.length <= max ? one : `${one.slice(0, max - 1)}…`;
 	}
 
-	/** Paint the model: header at column 0, tree connectors └─/├─ down the jobs. */
+	/** Paint the model: header at column 0, branch rows indented one level. */
 	function paintWidget(
 		model: WidgetModel,
 		theme: WidgetTheme,
@@ -130,14 +130,16 @@ export default function shellBackground(pi: ExtensionAPI) {
 			const isLast = index === rows.length - 1;
 			const branch = theme.fg("dim", isLast ? "└─ " : "├─ ");
 			if (!row) {
-				lines.push(`${branch}${theme.fg("dim", `⋯ and ${model.hidden} more`)}`);
+				lines.push(
+					`  ${branch}${theme.fg("dim", `⋯ and ${model.hidden} more`)}`,
+				);
 				continue;
 			}
 			const id = theme.fg("dim", row.id.padEnd(6));
 			const auto = row.auto ? theme.fg("dim", " (auto)") : "";
 			const cmd = clipPlain(row.command, Math.max(12, width - 20));
 			const meta = theme.fg("dim", ` · ${row.elapsedText}`);
-			lines.push(`${branch}${id} ${cmd}${meta}${auto}`);
+			lines.push(`  ${branch}${id} ${cmd}${meta}${auto}`);
 		}
 		return lines;
 	}
