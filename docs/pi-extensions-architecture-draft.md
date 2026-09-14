@@ -1,4 +1,4 @@
-# Pi Extensions — Kiến trúc (baseline; D3/D5 còn mở theo khuyến nghị)
+# Pi Extensions — Kiến trúc (baseline — mọi quyết định đã chốt)
 
 > Trạng thái: các mục đánh dấu **ĐÃ CHỐT** là quyết định đã lock (decision record
 > `docs/decisions/0008-pi-extensions-architecture.md`). Phần còn lại là thiết kế chi tiết để implement.
@@ -216,13 +216,13 @@ tách thành npm workspaces nhiều package con cùng share `src/` — đểphas
 4. shell-bg: src/ thuần trước → extension glue (bash override, status/kill, widget, delivery).
 5. README per extension (usage + settings + caps) — làm doc owner cho từng tool.
 
-## 8. Open decisions (chốt trước khi code)
+## 8. Decisions (tất cả đã chốt)
 
-| # | Câu hỏi | Khuyến nghị |
+| # | Câu hỏi | Kết quả |
 |---|---|---|
 | D1 | Tên package + scope | **ĐÃ CHỐT: `pi-utils`** (không scope) |
 | D2 | Override `grep` vs tên mới `fs_grep` | **ĐÃ CHỐT: override `grep` + `glob` tên mới, design merged** (mục 3.2) |
-| D3 | rg binary: bundle `@vscode/ripgrep` vs resolver PATH→pi binDir | Resolver, không bundle |
+| D3 | rg binary: bundle `@vscode/ripgrep` vs resolver PATH→pi binDir | **ĐÃ CHỐT: resolver PATH → pi binDir → error hint, không bundle** |
 | D4 | shell-bg: tự viết theo pattern pify vs phụ thuộc `@pify/shell-background` | **ĐÃ CHỐT: tự viết** (pattern pify, credit MIT trong header) |
-| D5 | Có cần spill store versioned như dsh không | Không — tempfile + locator là đủ v1 |
+| D5 | Có cần spill store versioned như dsh không | **ĐÃ CHỐT: không — tempfile + locator là đủ v1** |
 | D6 | Publish npm public hay giữ private/git-install | **ĐÃ CHỐT: git cục bộ, không push/publish v1** |
