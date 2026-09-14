@@ -281,4 +281,77 @@ describe("shell-bg glue", () => {
 			triggerTurn: true,
 		});
 	});
+
+	test("pure search command routes to the fs-search core (US-001)", async () => {
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/shell-bg.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const bash = captured.tools.find((t) => t.name === "bash");
+		if (!bash) throw new Error("bash tool missing");
+		const result = (await bash.execute(
+			"t8",
+			{ command: "rg keyword-glue" },
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as {
+			content: Array<{ type: string; text: string }>;
+			details: Record<string, unknown>;
+		};
+		expect(result.content[0]?.text).toContain(
+			"[fs-search] bash routed to grep semantics",
+		);
+		expect(result.content[0]?.text).toContain("readme.md:2: keyword-glue here");
+		expect(result.details).toMatchObject({
+			routed: true,
+			kind: "grep",
+			matchCount: 1,
+		});
+	});
+
+	test("background, timeout, and non-search commands never route", async () => {
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/shell-bg.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const bash = captured.tools.find((t) => t.name === "bash");
+		if (!bash) throw new Error("bash tool missing");
+		const asText = (r: unknown) =>
+			(r as { content: Array<{ text: string }> }).content[0]?.text ?? "";
+		const asDetails = (r: unknown) =>
+			(r as { details: Record<string, unknown> }).details;
+
+		const bg = (await bash.execute(
+			"t9",
+			{ command: "rg keyword-glue", background: true },
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { content: Array<{ type: string; text: string }>; details: object };
+		expect(asText(bg)).toContain("started in the background");
+		expect(asDetails(bg).routed).toBeUndefined();
+
+		const timed = (await bash.execute(
+			"t10",
+			{ command: "rg keyword-glue", timeout: 5 },
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { content: Array<{ type: string; text: string }>; details: object };
+		expect(asText(timed)).toContain("exit 0");
+		expect(asText(timed)).not.toContain("[fs-search]");
+		expect(asDetails(timed).routed).toBeUndefined();
+
+		const plain = (await bash.execute(
+			"t11",
+			{ command: "echo plain-ok" },
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { content: Array<{ type: string; text: string }>; details: object };
+		expect(asText(plain)).toContain("plain-ok");
+		expect(asText(plain)).not.toContain("[fs-search]");
+		expect(asDetails(plain).routed).toBeUndefined();
+	});
 });

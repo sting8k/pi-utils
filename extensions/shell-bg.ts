@@ -12,7 +12,10 @@
  *     "moved to background, id=…" and the result is delivered into the
  *     conversation when the command finishes;
  *   - `background: true` launches detached from the start and returns the id
- *     immediately; `timeout: N` (seconds) kills the whole process tree.
+ *     immediately; `timeout: N` (seconds) kills the whole process tree;
+ *   - standalone pure searches (`rg` / `grep` / `find` with no pipes, chains
+ *     or substitution) route to the fs-search cores (US-001): caps, spill
+ *     files, formatted rows — anything else runs in bash unchanged.
  *
  * `shell_status` polls or collects a job (and lists them all); `shell_kill`
  * terminates one and its whole tree. `/shell-bg` lists jobs, `/shell-bg kill
@@ -36,11 +39,18 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { resolveRg } from "../src/common/rg-resolver.ts";
 import {
 	DEFAULT_SETTINGS,
 	loadSettings,
 	type PiUtilsSettings,
 } from "../src/common/settings.ts";
+import {
+	matchBashSearch,
+	type RoutedSearch,
+} from "../src/fs-search/bash-router.ts";
+import { runGlob } from "../src/fs-search/glob-core.ts";
+import { runGrep } from "../src/fs-search/grep-core.ts";
 import {
 	type DroidRenderers,
 	loadDroidRenderers,
@@ -93,6 +103,14 @@ export default function shellBackground(pi: ExtensionAPI) {
 		const id = process.env.PI_SESSION_ID;
 		if (id) return id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
 		return createHash("sha256").update(cwd).digest("hex").slice(0, 16);
+	}
+
+	let rgPath: string | null = null;
+
+	/** Lazy rg resolution, same pattern as the fs-search extension. */
+	function rg(): string {
+		if (rgPath === null) rgPath = resolveRg(getAgentDir());
+		return rgPath;
 	}
 
 	/** Shell + args, reusing pi's resolution; command rides in argv (not stdin). */
@@ -258,6 +276,67 @@ export default function shellBackground(pi: ExtensionAPI) {
 			});
 	}
 
+	/**
+	 * Execute a routed search on the fs-search core (US-001): one-line note
+	 * prefix stating routing + superset ignore semantics + caps/spill, core
+	 * counts in details. A core error is surfaced as an error result — never a
+	 * silent bash fallback (the command already proved routable).
+	 */
+	async function routedResult(
+		routed: RoutedSearch,
+		ctx: ExtensionContext,
+		signal: AbortSignal | undefined,
+	): Promise<ToolResult> {
+		const note =
+			`[fs-search] bash routed to ${routed.kind} semantics — hidden+` +
+			"gitignored files included, caps + spill apply.";
+		try {
+			if (routed.kind === "grep") {
+				const result = await runGrep(
+					rg(),
+					routed.params,
+					settings.fsSearch,
+					ctx.cwd,
+					signal,
+				);
+				return {
+					content: [{ type: "text", text: `${note}\n${result.text}` }],
+					details: {
+						routed: true,
+						kind: routed.kind,
+						matchCount: result.matchCount,
+						fileCount: result.fileCount,
+						matchLimitReached: result.matchLimitReached,
+						spillPath: result.spillPath,
+					},
+				};
+			}
+			const result = await runGlob(
+				rg(),
+				routed.params,
+				settings.fsSearch,
+				ctx.cwd,
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: `${note}\n${result.text}` }],
+				details: {
+					routed: true,
+					kind: routed.kind,
+					total: result.total,
+					spillPath: result.spillPath,
+				},
+			};
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return {
+				content: [{ type: "text", text: `${note}\n${message}` }],
+				details: { routed: true, kind: routed.kind },
+				isError: true,
+			};
+		}
+	}
+
 	async function runBash(
 		params: BashParams,
 		signal: AbortSignal | undefined,
@@ -273,6 +352,14 @@ export default function shellBackground(pi: ExtensionAPI) {
 				details: {},
 				isError: true,
 			};
+		}
+
+		// US-001: standalone pure searches execute on the fs-search cores —
+		// only for plain foreground calls without a timeout, which keep no job
+		// lifecycle. Anything the matcher cannot prove 1:1 falls through.
+		if (!params.background && params.timeout === undefined) {
+			const routed = matchBashSearch(command);
+			if (routed) return routedResult(routed, ctx, signal);
 		}
 
 		const job = registry.create(command, ctx.cwd);
