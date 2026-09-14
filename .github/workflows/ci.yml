@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pi-utils
+
+      # The dev dependency "@sting8k/pi-droid-styling": "file:../pi-droid-styling"
+      # points at a sibling checkout that only exists on dev machines (for live
+      # pi rendering). CI never imports the real package — tests pin a stub or
+      # an unresolvable specifier — so a minimal stand-in sibling satisfies the
+      # file: resolution and the install proceeds.
+      - name: Stub sibling droid-styling package
+        run: |
+          mkdir -p pi-droid-styling
+          printf '{"name":"@sting8k/pi-droid-styling","version":"2.13.0","type":"module"}' \
+            > pi-droid-styling/package.json
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        working-directory: pi-utils
+        run: bun install
+
+      - name: Check (biome + tsc)
+        working-directory: pi-utils
+        run: bun run check
+
+      - name: Test
+        working-directory: pi-utils
+        run: bun test
