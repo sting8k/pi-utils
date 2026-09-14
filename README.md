@@ -14,32 +14,22 @@ Utility extensions for the [Pi coding agent](https://github.com/earendil-works/p
 
 ## Installation
 
-Local checkout for now (no npm publish yet):
+```bash
+pi install git:github.com/sting8k/pi-utils
+```
+
+Once published to npm:
+
+```bash
+pi install npm:@sting8k/pi-utils
+```
+
+For local development:
 
 ```sh
-git clone <this repo> && cd pi-utilities
+git clone https://github.com/sting8k/pi-utils && cd pi-utils
 bun install
-```
-
-Quick test without installing:
-
-```sh
 pi -e ./extensions/fs-search.ts -e ./extensions/shell-bg.ts
-```
-
-For auto-discovery and hot `/reload`, add the package root to the `extensions` array in `~/.pi/agent/settings.json` (pi reads the `pi.extensions` entries from `package.json`):
-
-```json
-{
-  "extensions": ["/absolute/path/to/pi-utilities"]
-}
-```
-
-Alternatively, symlink both entries into the global extensions dir:
-
-```sh
-ln -s "$PWD/extensions/fs-search.ts" ~/.pi/agent/extensions/pi-utils-fs-search.ts
-ln -s "$PWD/extensions/shell-bg.ts" ~/.pi/agent/extensions/pi-utils-shell-bg.ts
 ```
 
 Requires `rg` on `PATH` (or run Pi's built-in grep once so Pi downloads ripgrep into `~/.pi/agent/bin`).

@@ -70,5 +70,10 @@ Tradeoffs:
 - D3 (rg resolver) and D5 (tempfile spill, no versioned spill store) confirmed per
   recommendation on 2026-09-14 — no open architecture items remain.
 - Private remote created and pushed early at the owner's request
-  (github.com/sting8k/pi-utils) — still no npm publish; revisit publishing when
-  the extensions are stable in daily use.
+  (github.com/sting8k/pi-utils) — npm publish deferred; revisit when the
+  extensions are stable in daily use.
+- Install guidance (2026-09-14, owner): exactly two consumer paths —
+  `pi install git:github.com/sting8k/pi-utils` now, and
+  `pi install npm:@sting8k/pi-utils` once published (mirrors pi-vcc). The
+  README documents these two; the earlier "settings.json extensions array"
+  recommendation was a pre-publish workaround and is now local-dev only.
