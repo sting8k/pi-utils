@@ -150,7 +150,7 @@ why — not a session log. ```
 
 ### Nudge (optional)
 
-`skills.nudge_interval` (default 0 = off). Count tool iterations
+`skills.nudge_interval` (default 10; 0 = off). Count tool iterations
 since last `skill_write`; at threshold append once to the next tool
 result — `"[skills] N iters since last skill write — worth saving
 anything?"` — then reset the counter to 0 and count again. Counter
@@ -226,7 +226,7 @@ rediscover skills ourselves — we only decide how loudly each shows.
 - `bash cat` then patch → still refused (guard keys on read tool)
 - delete → gone; bad frontmatter create → rejected with fixable
   message; failed multi-step → rolled back
-- nudge off by default; with interval=3 fires after 3 iters
+- nudge on by default (interval 10); interval=3 fires after 3 iters; 0 = silent
 - `skills.index=native` → prompt block byte-identical to native
 - smart mode: skill with `platforms:[windows]` on macOS absent;
   `requires:[bogus-bin]` absent; >limit → names-only demotion +
