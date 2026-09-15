@@ -58,6 +58,10 @@ requires filtering (v2 via `before_agent_start` if needed),
 project-local creation (`.pi/skills`), telemetry, curator, ledger,
 write approval, security scan, hub/sync, batch `write_file` ops,
 `absorbed_into`, `edit` full-rewrite op, background review fork.
+**Contextual index filtering** (platforms/requires hide, category
+demotion, quality flags) is deferred but the mechanism is known and
+spec'd below — it is a transform of native's rendered index, not a
+rebuild.
 
 ## Owner decisions already settled (do not relitigate)
 
@@ -151,6 +155,18 @@ why — not a session log. ```
 `skills.nudge_interval` (default 0 = off). Count tool iterations
 since last `skill_write`; at threshold append to next tool result:
 `"[skills] N iters since last skill write — worth saving anything?"`
+
+### v2 path — contextual index filter (deferred, mechanism known)
+
+When skills grow (>~50) or the prompt index gets noisy: hook
+`before_agent_start`, parse the native `<available_skills>` block,
+apply `platforms`/`requires` filtering + category demotion + quality
+flags, return the rewritten systemPrompt — same hook shape as the
+rules block, replace-then-return. ~80 lines. The
+tolerated-but-recommended frontmatter fields agents write from day
+one are the data this filter consumes — no backfill needed. Coupling
+risk: native's XML render format may change across pi versions —
+transform must pass through untouched on parse failure.
 
 ## Context Map
 
