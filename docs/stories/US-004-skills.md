@@ -30,7 +30,8 @@ and prompt injection are all native. We build nothing there.
 
 Close the self-improvement loop's **write half**: the agent can save
 a learned procedure as a skill, patch a wrong/stale skill in place,
-and delete one — through one guarded funnel. The read/recall half is
+and delete one — through one preferred funnel (soft: guards hold
+inside skill_write; generic file tools are not blocked). The read/recall half is
 native.
 
 ```
@@ -52,7 +53,7 @@ improve (skill_write patch) → repeat
 - **smart index transform** — same hook: locate native's
   `<available_skills>` block, re-render with visibility pipeline
   (config `skills.index`: `smart` default | `native` passthrough)
-- optional iteration nudge — `skills.nudge_interval`, default off
+- iteration nudge — `skills.nudge_interval`, default 10 (0 = off)
 
 ### Out (deferred)
 
@@ -143,7 +144,8 @@ starting. If a skill is wrong or missing steps, patch it with
 skill_write before finishing. After a hard task or a user
 correction, save the lesson as a skill: class-level name (never
 "fix-X-today"), description = "Use when <trigger>", rules with
-why — not a session log. ```
+why — not a session log.
+```
 
 (If the injection hook can't append: same text lands in the
 `skill_write` schema description instead — weaker but zero-API.)
@@ -217,8 +219,7 @@ rediscover skills ourselves — we only decide how loudly each shows.
 ## Acceptance / Proof
 
 - create → file at `~/.pi/agent/skills/<name>/SKILL.md`; next-turn
-  prompt index lists it (native does the render — verify, don't
-  build)
+  prompt index lists it (via smart transform of native's render)
 - create with long desc → succeeds, response carries warning +
   `index_preview`
 - patch on unviewed existing skill → read-before-write error; after
