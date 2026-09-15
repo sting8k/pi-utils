@@ -120,6 +120,10 @@ error message names the way out.
   prompt-bloat concern, not a routing blocker; keep it advisory.)
 - unknown fields pass through (native flags like
   `disable-model-invocation` untouched)
+- `platforms` / `requires` / `tags` / `related` are
+  tolerated-but-recommended: `create` response nudges including them
+  (one line) — v2 filtering via `before_agent_start` can consume the
+  data on day one, no backfill
 - `patch`/`delete`: frontmatter checks skipped — existing skills
   stay maintainable; every rejection names the fix.
 
