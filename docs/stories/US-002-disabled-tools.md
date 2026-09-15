@@ -92,12 +92,20 @@ Out of scope:
 ## Coordination / Handoff
 
 - Integrating owner: main pi-utils session (bean).
-- Delegated scope and actor: Xi — implementation + tests + docs +
-  commit/push.
-- Current state: design approved by owner 2026-09-14 (this packet is the
-  contract); no code written yet.
-- Next action: Xi implements; main session verifies acceptance and flips
-  Status to `implemented`.
+- Delegated scope and actor: Xi — implementation + tests + docs. **Commits
+  stay local**; push is NOT part of any peer's delegated scope.
+- PROTOCOL (added 2026-09-15 after the US-002 incident): the handoff
+  message erroneously granted Xi push rights inherited from the US-001
+  pattern without an explicit owner grant; Xi pushed f7b4ab1 before the
+  hold. Owner reviewed and kept the commit. Standing rule going forward:
+  peers commit locally and report; only the owner — or someone the owner
+  names in so many words — pushes. Delegation never inherits push.
+- Current state: implemented — commit f7b4ab1 (settings + gates + tests +
+  README), CI green; main session re-verified locally 2026-09-15 (check
+  clean, 187/187). Remaining: owner E2E smoke.
+- Next action or owner: E2E smoke — set `"disabledTools": ["glob"]` in
+  pi-utils.json, `/reload`, confirm glob tool absent while grep stays —
+  then main session flips Status to `implemented`.
 
 ## Acceptance / Proof
 
