@@ -6,7 +6,13 @@
  * scaffold, rg fallback) never touches the real ~/.pi/agent.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -86,6 +92,12 @@ let root = "";
 beforeAll(async () => {
 	agentDir = mkdtempSync(join(tmpdir(), "pi-utils-agentdir-"));
 	process.env.PI_CODING_AGENT_DIR = agentDir;
+	// Explicit enabled-search baseline: DEFAULT_SETTINGS now ships
+	// grep/glob disabled (owner preference) — tool glue tests need them on.
+	writeFileSync(
+		join(agentDir, "pi-utils.json"),
+		JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: [] }),
+	);
 	process.env.PI_SESSION_ID = "pi-utils-tests";
 	// Never import the real droid-styling here: pin an unresolvable module so
 	// session_start's loadDroidRenderers() fails fast (default-rendering path).
@@ -111,6 +123,20 @@ async function startSession(
 }
 
 describe("fs-search glue", () => {
+	test("default scaffold leaves standalone search tools off (opt-in)", async () => {
+		// Fresh agentDir (no file) -> scaffold writes DEFAULT_SETTINGS,
+		// which ships grep/glob in disabledTools: nothing registers.
+		const tmp = join(root, "fresh-agent");
+		mkdirSync(tmp, { recursive: true });
+		const prev = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = tmp;
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/fs-search.ts");
+		mod.default(api);
+		expect(captured.tools).toEqual([]);
+		process.env.PI_CODING_AGENT_DIR = prev;
+	});
+
 	test("registers grep and glob with prompt snippets", async () => {
 		const { api, captured } = fakePi();
 		const mod = await import("../extensions/fs-search.ts");

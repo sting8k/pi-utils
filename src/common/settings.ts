@@ -89,7 +89,11 @@ export const DEFAULT_SETTINGS: PiUtilsSettings = {
 		lang: "python",
 		timeoutSec: 10,
 	},
-	disabledTools: [],
+	// Owner preference (2026-09-15): standalone search tools ship OFF by
+	// default — the bash router (US-001) already runs rg/grep/glob-style
+	// commands through the same fs-search cores, so one surface suffices.
+	// Set [] to opt back into the dedicated grep/glob tools.
+	disabledTools: ["grep", "glob"],
 };
 
 export interface SettingsLoadResult {

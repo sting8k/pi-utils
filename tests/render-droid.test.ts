@@ -119,6 +119,12 @@ describe("extension re-registration with droid renderers", () => {
 	beforeAll(() => {
 		agentDir = mkdtempSync(join(tmpdir(), "pi-utils-agentdir-"));
 		process.env.PI_CODING_AGENT_DIR = agentDir;
+		// Explicit enabled-search baseline: DEFAULT now ships grep/glob
+		// disabled (owner preference) — this suite asserts on grep rendering.
+		writeFileSync(
+			join(agentDir, "pi-utils.json"),
+			JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: [] }),
+		);
 		process.env.PI_SESSION_ID = "pi-utils-render-tests";
 		root = mkdtempSync(join(tmpdir(), "pi-utils-render-"));
 		writeFileSync(join(root, "a.md"), "hello render-test\n");

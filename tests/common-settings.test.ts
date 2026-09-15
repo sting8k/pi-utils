@@ -157,7 +157,7 @@ describe("loadSettings — disabledTools (US-002)", () => {
 			JSON.stringify({ fsSearch: {}, shellBg: {} }),
 		);
 		const result = loadSettings(dir);
-		expect(result.settings.disabledTools).toEqual([]);
+		expect(result.settings.disabledTools).toEqual(["grep", "glob"]);
 		expect(result.warnings).toEqual([]);
 	});
 
@@ -167,7 +167,7 @@ describe("loadSettings — disabledTools (US-002)", () => {
 			JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: "grep" }),
 		);
 		const result = loadSettings(dir);
-		expect(result.settings.disabledTools).toEqual([]);
+		expect(result.settings.disabledTools).toEqual(["grep", "glob"]);
 		expect(
 			result.warnings.some((w) => w.includes('"disabledTools" invalid')),
 		).toBe(true);
@@ -203,7 +203,7 @@ describe("loadSettings — repair pass (owner decision 2026-09-15)", () => {
 		expect(result.created).toBe(false);
 		expect(result.settings.bashRouter.unwrapPrefixes).toEqual(["rtk"]);
 		expect(result.settings.edit).toEqual({ lang: "python", timeoutSec: 10 });
-		expect(result.settings.disabledTools).toEqual([]);
+		expect(result.settings.disabledTools).toEqual(["grep", "glob"]);
 		// Custom values survive verbatim.
 		expect(result.settings.fsSearch.globMaxResults).toBe(42);
 		expect(result.settings.shellBg.autoBackgroundMs).toBe(45_000);

@@ -162,7 +162,7 @@ All settings live in `~/.pi/agent/pi-utils.json` — created with these defaults
     "lang": "python",
     "timeoutSec": 10
   },
-  "disabledTools": []
+  "disabledTools": ["grep", "glob"]
 }
 ```
 
@@ -171,8 +171,10 @@ All settings live in `~/.pi/agent/pi-utils.json` — created with these defaults
 `disabledTools` is a list of pi-utils tool names that are skipped at
 registration time — turn off one tool, keep the rest of the module running.
 Valid names are `grep`, `glob`, `bash`, `shell_status`, `shell_kill`, `edit`. The key
-is optional (absent or empty = everything registers); unknown names produce a
-warning and are dropped, duplicates dedupe.
+is optional; **fresh installs scaffold with `["grep", "glob"]` — standalone
+search tools ship OFF by default because the bash router already runs
+rg/grep/glob-style commands through the same engines; set `[]` to turn them
+back on.** Unknown names produce a warning and are dropped, duplicates dedupe.
 
 Layering — two levels of toggles: to disable a whole module, use pi's own
 extension toggle (`package.json → "pi"."extensions"`); to disable a single
