@@ -54,6 +54,9 @@ improve (skill_write patch) → repeat
   `<available_skills>` block, re-render with visibility pipeline
   (config `skills.index`: `smart` default | `native` passthrough)
 - iteration nudge — `skills.nudge_interval`, default 10 (0 = off)
+- kill-switch — `disabledTools` matching `skill_write` disables the
+  WHOLE layer (tool + transform + rules block + nudge), not just
+  the tool
 
 ### Out (deferred)
 
@@ -196,6 +199,25 @@ entry's SKILL.md frontmatter off disk (frontmatter-only parse, cached
 per session, shared parser with `skill_write` validation). We never
 rediscover skills ourselves — we only decide how loudly each shows.
 
+### Kill-switch (two-tier contract)
+
+`disabledTools` matching `skill_write` (US-002 matcher: exact +
+trailing-`*` wildcard, e.g. `skill*` covers it) kills the ENTIRE
+skills layer:
+
+- the `before_agent_start` handler returns `undefined` outright —
+  no index transform, no rules block (native `<available_skills>`
+  stays untouched)
+- the nudge listener is inert — nothing appended to tool results
+- the tool itself is already hidden by the existing disabledTools
+  gate
+
+Two tiers, deliberate: `disabledTools` = kill-switch for the layer;
+`skills.*` config = fine-tune while the layer is alive (e.g. keep
+the tool but want native's flat index → `skills.index=native`). Rationale: prompt-side effects aren't tools, so
+disabledTools can't literally reach them — the handler honoring the
+matcher is a design choice, not a gap.
+
 ## Context Map
 
 - new: `extensions/skill-write.ts` — tool registration (follow
@@ -229,6 +251,8 @@ rediscover skills ourselves — we only decide how loudly each shows.
   message; failed multi-step → rolled back
 - nudge on by default (interval 10); interval=3 fires after 3 iters; 0 = silent
 - `skills.index=native` → prompt block byte-identical to native
+- `disabledTools: ["skill*"]` → tool hidden AND prompt untouched
+  (native index as-is, no rules block) AND no nudge lines
 - smart mode: skill with `platforms:[windows]` on macOS absent;
   `requires:[bogus-bin]` absent; >limit → names-only demotion +
   pointer; malformed frontmatter → `⚠` flag; unparseable native
