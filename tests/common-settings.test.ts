@@ -134,3 +134,57 @@ describe("loadSettings — bashRouter (Amendment A1)", () => {
 		).toBe(true);
 	});
 });
+
+describe("loadSettings — disabledTools (US-002)", () => {
+	test("valid list parses; duplicates dedupe", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({
+				fsSearch: {},
+				shellBg: {},
+				disabledTools: ["grep", "glob", "grep"],
+			}),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.disabledTools).toEqual(["grep", "glob"]);
+		expect(result.warnings).toEqual([]);
+	});
+
+	test("missing key picks up the default silently (no warning)", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			// Pre-US-002 shape: no disabledTools key.
+			JSON.stringify({ fsSearch: {}, shellBg: {} }),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.disabledTools).toEqual([]);
+		expect(result.warnings).toEqual([]);
+	});
+
+	test("non-array warns and falls back to the default", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: "grep" }),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.disabledTools).toEqual([]);
+		expect(
+			result.warnings.some((w) => w.includes('"disabledTools" invalid')),
+		).toBe(true);
+	});
+
+	test("unknown entry warns by name and is dropped; valid siblings survive", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({
+				fsSearch: {},
+				shellBg: {},
+				disabledTools: ["grpe", "glob", 42],
+			}),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.disabledTools).toEqual(["glob"]);
+		expect(result.warnings.some((w) => w.includes('"grpe"'))).toBe(true);
+		expect(result.warnings.some((w) => w.includes("42"))).toBe(true);
+	});
+});

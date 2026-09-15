@@ -42,7 +42,18 @@ export interface PiUtilsSettings {
 	fsSearch: FsSearchSettings;
 	shellBg: ShellBgSettings;
 	bashRouter: BashRouterSettings;
+	/** Tools skipped at registration time (US-002). Names must be in KNOWN_TOOLS. */
+	disabledTools: string[];
 }
+
+/** Every tool pi-utils can register — single source of truth for disabledTools. */
+export const KNOWN_TOOLS = [
+	"grep",
+	"glob",
+	"bash",
+	"shell_status",
+	"shell_kill",
+] as const;
 
 export const DEFAULT_SETTINGS: PiUtilsSettings = {
 	fsSearch: {
@@ -62,6 +73,7 @@ export const DEFAULT_SETTINGS: PiUtilsSettings = {
 	bashRouter: {
 		unwrapPrefixes: ["rtk"],
 	},
+	disabledTools: [],
 };
 
 export interface SettingsLoadResult {
@@ -227,6 +239,36 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 					`"bashRouter.unwrapPrefixes" invalid (${JSON.stringify(value)}) — using default`,
 				);
 			}
+		}
+	}
+
+	// disabledTools (US-002): a missing key stays silent — pre-existing settings
+	// files must not start warning (same precedent as bashRouter Amendment A1).
+	const dtRaw = parsed.disabledTools;
+	if (dtRaw !== undefined) {
+		if (!Array.isArray(dtRaw)) {
+			warnings.push(
+				`"disabledTools" invalid (${JSON.stringify(dtRaw)}) — using default`,
+			);
+		} else {
+			const seen = new Set<string>();
+			const dropped: string[] = [];
+			for (const entry of dtRaw) {
+				if (
+					typeof entry !== "string" ||
+					!(KNOWN_TOOLS as readonly string[]).includes(entry)
+				) {
+					dropped.push(JSON.stringify(entry)); // typo protection: name the bad entry
+					continue;
+				}
+				seen.add(entry); // duplicates dedupe silently
+			}
+			if (dropped.length > 0) {
+				warnings.push(
+					`"disabledTools" ignores unknown entries: ${dropped.join(", ")}`,
+				);
+			}
+			settings.disabledTools = [...seen];
 		}
 	}
 

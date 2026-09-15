@@ -189,6 +189,9 @@ export default function shellBackground(pi: ExtensionAPI) {
 	}
 
 	function renderWidget(ctx: ExtensionContext | null = lastUiCtx): void {
+		// bash is a cluster head (owner decision, US-002): disabled ⇒ no override,
+		// no jobs can exist, no widget.
+		if (settings.disabledTools.includes("bash")) return;
 		if (!ctx?.hasUI || !registry) return;
 		lastUiCtx = ctx;
 		const model = widgetModel(registry.all());
@@ -508,7 +511,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 		}
 	}
 
-	function registerTools(droid: DroidRenderers | null): void {
+	function registerBash(droid: DroidRenderers | null): void {
 		pi.registerTool({
 			name: "bash",
 			label: "bash",
@@ -545,7 +548,9 @@ export default function shellBackground(pi: ExtensionAPI) {
 			},
 			...droidToolRender(droid, bashRenderers),
 		});
+	}
 
+	function registerShellStatus(droid: DroidRenderers | null): void {
 		pi.registerTool({
 			name: "shell_status",
 			label: "Shell status",
@@ -588,7 +593,9 @@ export default function shellBackground(pi: ExtensionAPI) {
 			},
 			...droidToolRender(droid, simpleRenderers("Shell status")),
 		});
+	}
 
+	function registerShellKill(droid: DroidRenderers | null): void {
 		pi.registerTool({
 			name: "shell_kill",
 			label: "Shell kill",
@@ -623,6 +630,21 @@ export default function shellBackground(pi: ExtensionAPI) {
 		});
 	}
 
+	function registerTools(droid: DroidRenderers | null): void {
+		const disabled = new Set(settings.disabledTools);
+		// bash is a cluster head (owner decision, US-002): disabling it pulls
+		// shell_status/shell_kill and the Jobs widget along — no jobs can exist.
+		if (disabled.has("bash")) return;
+		registerBash(droid);
+		if (!disabled.has("shell_status")) registerShellStatus(droid);
+		if (!disabled.has("shell_kill")) registerShellKill(droid);
+	}
+
+	// Load settings once at init so disabledTools gates the eager registration
+	// below; session_start reloads (picks up edits before re-registering).
+	settings = loadSettings(getAgentDir()).settings;
+	registerTools(null);
+
 	pi.registerCommand("shell-bg", {
 		description: "List background shell jobs; '/shell-bg kill <id>' stops one",
 		handler: async (args, ctx) => {
@@ -646,6 +668,4 @@ export default function shellBackground(pi: ExtensionAPI) {
 			ctx.ui.notify(formatList(registry.all()), "info");
 		},
 	});
-
-	registerTools(null);
 }

@@ -74,7 +74,7 @@ export default function fsSearchExtension(pi: ExtensionAPI) {
 		if (droid) registerTools(droid);
 	});
 
-	function registerTools(droid: DroidRenderers | null): void {
+	function registerGrep(droid: DroidRenderers | null): void {
 		pi.registerTool({
 			name: "grep",
 			label: "grep",
@@ -173,7 +173,9 @@ export default function fsSearchExtension(pi: ExtensionAPI) {
 				});
 			},
 		});
+	}
 
+	function registerGlob(droid: DroidRenderers | null): void {
 		pi.registerTool({
 			name: "glob",
 			label: "glob",
@@ -225,5 +227,14 @@ export default function fsSearchExtension(pi: ExtensionAPI) {
 		});
 	}
 
+	function registerTools(droid: DroidRenderers | null): void {
+		const disabled = new Set(settings.disabledTools);
+		if (!disabled.has("grep")) registerGrep(droid);
+		if (!disabled.has("glob")) registerGlob(droid);
+	}
+
+	// Load settings once at init so disabledTools gates the eager registration
+	// below; session_start reloads (picks up edits before re-registering).
+	settings = loadSettings(getAgentDir()).settings;
 	registerTools(null);
 }

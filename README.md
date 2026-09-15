@@ -136,9 +136,31 @@ All settings live in `~/.pi/agent/pi-utils.json` — created with these defaults
   },
   "bashRouter": {
     "unwrapPrefixes": ["rtk"]
-  }
+  },
+  "disabledTools": []
 }
 ```
+
+### Disabling individual tools (`disabledTools`)
+
+`disabledTools` is a list of pi-utils tool names that are skipped at
+registration time — turn off one tool, keep the rest of the module running.
+Valid names are `grep`, `glob`, `bash`, `shell_status`, `shell_kill`. The key
+is optional (absent or empty = everything registers); unknown names produce a
+warning and are dropped, duplicates dedupe.
+
+Layering — two levels of toggles: to disable a whole module, use pi's own
+extension toggle (`package.json → "pi"."extensions"`); to disable a single
+tool inside pi-utils, use `disabledTools`.
+
+What happens when a tool is disabled:
+
+- `grep` — pi's built-in grep stays in charge (pi-utils no longer overrides it)
+- `bash` — pi's built-in bash stays in charge. `bash` is a cluster head:
+  disabling it also removes `shell_status`, `shell_kill`, and the Jobs widget
+  (with the override off, no background jobs can exist)
+- `glob`, `shell_status`, `shell_kill` — pi has no native equivalent, so the
+  tool is simply absent
 
 Development:
 

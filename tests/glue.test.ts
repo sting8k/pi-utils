@@ -378,3 +378,43 @@ describe("shell-bg glue", () => {
 		expect(result.details).toMatchObject({ routed: true, matchCount: 1 });
 	});
 });
+
+describe("disabledTools glue (US-002)", () => {
+	test("grep disabled → grep not registered, glob still is", async () => {
+		writeFileSync(
+			join(agentDir, "pi-utils.json"),
+			JSON.stringify({ disabledTools: ["grep"] }),
+		);
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/fs-search.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		expect(captured.tools.map((t) => t.name)).toEqual(["glob"]);
+	});
+
+	test("bash disabled → bash/status/kill not registered, widget not wired", async () => {
+		writeFileSync(
+			join(agentDir, "pi-utils.json"),
+			JSON.stringify({ disabledTools: ["bash"] }),
+		);
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/shell-bg.ts");
+		mod.default(api);
+		let widgetsWired = 0;
+		const ctx = {
+			cwd: root,
+			hasUI: true,
+			ui: {
+				notify: () => {},
+				setWidget: () => {
+					widgetsWired += 1;
+				},
+			},
+		} as unknown as ExtensionContext;
+		await startSession(captured, ctx);
+		expect(captured.tools).toEqual([]);
+		expect(widgetsWired).toBe(0);
+		// Commands stay available; only the tools/widget cluster goes.
+		expect(captured.commands.map((c) => c.name)).toEqual(["shell-bg"]);
+	});
+});
