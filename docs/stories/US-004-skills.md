@@ -48,20 +48,18 @@ improve (skill_write patch) → repeat
 - frontmatter validation — minimal (native diagnostics own the
   format; we validate just enough to never write a broken file)
 - prompt rules block — small static section appended via
-  `before_agent_start` (the hook ctx-kit already proves exists)
+  `before_agent_start`
+- **smart index transform** — same hook: locate native's
+  `<available_skills>` block, re-render with visibility pipeline
+  (config `skills.index`: `smart` default | `native` passthrough)
 - optional iteration nudge — `skills.nudge_interval`, default off
 
 ### Out (deferred)
 
-`skill_view`/list tool, custom index rendering, demotion, platform/
-requires filtering (v2 via `before_agent_start` if needed),
-project-local creation (`.pi/skills`), telemetry, curator, ledger,
+`skill_view`/list tool, project-local creation (`.pi/skills`),
+telemetry, curator, ledger,
 write approval, security scan, hub/sync, batch `write_file` ops,
 `absorbed_into`, `edit` full-rewrite op, background review fork.
-**Contextual index filtering** (platforms/requires hide, category
-demotion, quality flags) is deferred but the mechanism is known and
-spec'd below — it is a transform of native's rendered index, not a
-rebuild.
 
 ## Owner decisions already settled (do not relitigate)
 
@@ -156,26 +154,51 @@ why — not a session log. ```
 since last `skill_write`; at threshold append to next tool result:
 `"[skills] N iters since last skill write — worth saving anything?"`
 
-### v2 path — contextual index filter (deferred, mechanism known)
+### Smart index transform (`before_agent_start`)
 
-When skills grow (>~50) or the prompt index gets noisy: hook
-`before_agent_start`, parse the native `<available_skills>` block,
-apply `platforms`/`requires` filtering + category demotion + quality
-flags, return the rewritten systemPrompt — same hook shape as the
-rules block, replace-then-return. ~80 lines. The
-tolerated-but-recommended frontmatter fields agents write from day
-one are the data this filter consumes — no backfill needed. Coupling
-risk: native's XML render format may change across pi versions —
-transform must pass through untouched on parse failure.
+ONE handler does transform + rules-block append in a single
+return (no chained double-return). Re-emit keeps the native tag
+name `<available_skills>` so the rules block and any tooling
+keyed on it stay coherent.
+
+Locate `<available_skills>…</available_skills>` in
+`event.systemPrompt`; parse entries per category; apply pipeline;
+re-emit in our own format and splice back. Parse failure or missing
+block → return unchanged (worst case = native).
+
+Pipeline per entry:
+
+1. `platforms` excludes host OS → hidden
+2. `requires` binary missing from PATH (`which`, cached/session) →
+   hidden
+3. `disable-model-invocation` → hidden (slash-only contract — same
+   as native)
+4. count > `skills.index_full_limit` (default 50) → categories
+   without recently-used skills collapse to names-only.
+   "Recently-used" = SKILL.md read this session via our read
+   tracking (same seen-map as the write guard) — session-scoped,
+   no persistence in v1
+5. quality flags: `⚠ missing description`, `⚠ possible overlap a≈b`
+   (same category + near-identical desc prefix)
+6. tail pointer when anything hidden/demoted:
+   `N more — ls ~/.pi/agent/skills/ or /skill:<name>`
+
+Data sources are split on purpose: **which skills exist** comes from
+native's block (name + path per entry — inherits user dir + project
+dir + extension-contributed `resources_discover` dirs + collision
+handling untouched); **visibility conditions** come from reading each
+entry's SKILL.md frontmatter off disk (frontmatter-only parse, cached
+per session, shared parser with `skill_write` validation). We never
+rediscover skills ourselves — we only decide how loudly each shows.
 
 ## Context Map
 
 - new: `extensions/skill-write.ts` — tool registration (follow
   `extensions/edit.ts`: registry, schema, `droidToolRender`)
 - new: `src/skills/` — frontmatter parse, guard tracking, write ops
-- touch: `src/common/settings.ts` — `skills.nudge_interval`
-  (skills_root fixed to native default; `skills.dir` only if bean
-  wants override)
+- touch: `src/common/settings.ts` — `skills.index` (smart|native),
+  `skills.index_full_limit`, `skills.nudge_interval`
+  (skills_root fixed to native default)
 - read-tracking hook: whatever Pi exposes for tool-call events
   (ReadToolCallEvent per Peanut) — confirm exact API at impl time
 - pi-droid-styling: check whether unknown tool names fall through
@@ -201,6 +224,11 @@ transform must pass through untouched on parse failure.
 - delete → gone; bad frontmatter create → rejected with fixable
   message; failed multi-step → rolled back
 - nudge off by default; with interval=3 fires after 3 iters
+- `skills.index=native` → prompt block byte-identical to native
+- smart mode: skill with `platforms:[windows]` on macOS absent;
+  `requires:[bogus-bin]` absent; >limit → names-only demotion +
+  pointer; malformed frontmatter → `⚠` flag; unparseable native
+  block → passthrough
 
 ## Validation
 
