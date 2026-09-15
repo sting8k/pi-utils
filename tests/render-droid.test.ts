@@ -109,6 +109,7 @@ describe("extension re-registration with droid renderers", () => {
 			cwd,
 			hasUI: false,
 			ui: { notify: () => {}, setWidget: () => {} },
+			sessionManager: { getSessionId: () => "render-droid-test" },
 		} as unknown as ExtensionContext;
 	}
 

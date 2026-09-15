@@ -28,7 +28,6 @@
  * decision 0008 / D4. Settings come from ~/.pi/agent/pi-utils.json.
  */
 
-import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -75,7 +74,11 @@ import {
 	DELIVERY_TYPE,
 	deliveryMessage,
 } from "../src/shell-bg/pending.ts";
-import { JobRegistry } from "../src/shell-bg/registry.ts";
+import {
+	gcSessionDirs,
+	JobRegistry,
+	sessionKeyFor,
+} from "../src/shell-bg/registry.ts";
 import { type Spawned, spawnToFile } from "../src/shell-bg/spawn.ts";
 import type { Job } from "../src/shell-bg/types.ts";
 
@@ -98,12 +101,6 @@ export default function shellBackground(pi: ExtensionAPI) {
 	let registry: JobRegistry | null = null;
 	let lastUiCtx: ExtensionContext | null = null;
 	let widgetTimer: ReturnType<typeof setInterval> | null = null;
-
-	function sessionKey(cwd: string): string {
-		const id = process.env.PI_SESSION_ID;
-		if (id) return id.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40);
-		return createHash("sha256").update(cwd).digest("hex").slice(0, 16);
-	}
 
 	let rgPath: string | null = null;
 
@@ -228,9 +225,13 @@ export default function shellBackground(pi: ExtensionAPI) {
 		for (const warning of loaded.warnings) {
 			ctx.ui.notify(`pi-utils shell-bg: ${warning}`, "warning");
 		}
-		registry = new JobRegistry(
-			join(tmpdir(), "pi-utils-shell-bg", sessionKey(ctx.cwd)),
-		);
+		// Session-scoped registry dir (decision 0013): the session id keeps
+		// concurrent sessions in the same cwd from sharing jobs/logs/deliveries;
+		// stale sibling dirs from dead sessions are swept opportunistically.
+		const parent = join(tmpdir(), "pi-utils-shell-bg");
+		const key = sessionKeyFor(ctx.sessionManager.getSessionId(), process.pid);
+		gcSessionDirs(parent, key);
+		registry = new JobRegistry(join(parent, key));
 		registry.load();
 		renderWidget(ctx);
 		// Adapt to @sting8k/pi-droid-styling when present (see render/droid.ts).

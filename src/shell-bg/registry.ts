@@ -15,6 +15,8 @@ import {
 	readdirSync,
 	readFileSync,
 	renameSync,
+	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -129,5 +131,55 @@ export class JobRegistry {
 			this.jobs.set(job.id, job);
 		}
 		return settled;
+	}
+}
+
+/**
+ * Registry directory key: MUST differ between concurrent pi sessions and stay
+ * stable across /reload of the same one. Use the extension context's
+ * sessionManager.getSessionId() — the same value pi injects as PI_SESSION_ID
+ * into bash child processes (the extension HOST never sees that env var, so
+ * reading process.env here is useless; it silently fell back to hashing the
+ * cwd, which made every session in one directory share one registry:
+ * colliding bg-N log paths, cross-read output files, shared delivered flags,
+ * and jobs delivered into the wrong conversation). Last-resort fallback is
+ * the host pid: still unique per concurrent process and /reload keeps it.
+ * The cwd is deliberately NOT part of the key.
+ */
+export function sessionKeyFor(
+	sessionId: string | undefined,
+	pid: number,
+): string {
+	const raw = sessionId && sessionId.length > 0 ? sessionId : `p${pid}`;
+	return raw.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 64);
+}
+
+/**
+ * Best-effort sweep of sibling session dirs older than maxAgeMs. keepKey (the
+ * current session) always survives; failures are swallowed — the sweep runs
+ * again next session.
+ */
+export function gcSessionDirs(
+	parent: string,
+	keepKey: string,
+	maxAgeMs = 24 * 60 * 60 * 1000,
+	now = Date.now(),
+): void {
+	let entries: string[];
+	try {
+		entries = readdirSync(parent);
+	} catch {
+		return;
+	}
+	for (const name of entries) {
+		if (name === keepKey) continue;
+		const dir = join(parent, name);
+		try {
+			if (statSync(dir).mtimeMs < now - maxAgeMs) {
+				rmSync(dir, { recursive: true, force: true });
+			}
+		} catch {
+			// Unreadable or racing — leave it for the next sweep.
+		}
 	}
 }

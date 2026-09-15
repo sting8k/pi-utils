@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,7 +21,11 @@ import {
 	DELIVERY_TYPE,
 	deliveryMessage,
 } from "../src/shell-bg/pending.ts";
-import { JobRegistry } from "../src/shell-bg/registry.ts";
+import {
+	gcSessionDirs,
+	JobRegistry,
+	sessionKeyFor,
+} from "../src/shell-bg/registry.ts";
 import { readTail } from "../src/shell-bg/tail.ts";
 import type { Job } from "../src/shell-bg/types.ts";
 
@@ -230,5 +241,47 @@ describe("widgetModel", () => {
 	test("auto flag survives into rows", () => {
 		const model = widgetModel([runningJob("bg-9", now - 31_000, true)], now);
 		expect(model.rows[0]?.auto).toBe(true);
+	});
+});
+
+// ── session-isolated registry keys (decision 0013) ─────────────────────────
+
+describe("sessionKeyFor", () => {
+	test("same session id → same key; different ids → different keys", () => {
+		expect(sessionKeyFor("sess-a", 100)).toBe(sessionKeyFor("sess-a", 200));
+		expect(sessionKeyFor("sess-a", 100)).not.toBe(sessionKeyFor("sess-b", 100));
+	});
+
+	test("no session id → falls back to host pid (unique per process, /reload-stable)", () => {
+		expect(sessionKeyFor(undefined, 42)).toBe("p42");
+		expect(sessionKeyFor(undefined, 42)).not.toBe(sessionKeyFor(undefined, 43));
+		expect(sessionKeyFor("", 42)).toBe("p42");
+	});
+
+	test("hostile id text is sanitized to a safe dir name", () => {
+		expect(sessionKeyFor("../../etc", 1)).not.toContain("/");
+		expect(sessionKeyFor("../../etc", 1)).not.toContain(".");
+		expect(sessionKeyFor("a/b\\c d", 1)).toBe("a_b_c_d");
+	});
+});
+
+describe("gcSessionDirs", () => {
+	test("sweeps only stale siblings; fresh dirs and keepKey survive", () => {
+		const parent = mkdtempSync(join(tmpdir(), "sb-gc-"));
+		const fresh = join(parent, "fresh-sess");
+		const stale = join(parent, "stale-sess");
+		const keep = join(parent, "keep-sess");
+		for (const d of [fresh, stale, keep]) mkdirSync(d);
+		const now = Date.now();
+		utimesSync(
+			stale,
+			new Date(now - 48 * 3600_000),
+			new Date(now - 48 * 3600_000),
+		);
+		gcSessionDirs(parent, "keep-sess", 24 * 3600_000, now);
+		expect(existsSync(fresh)).toBe(true);
+		expect(existsSync(stale)).toBe(false);
+		expect(existsSync(keep)).toBe(true);
+		rmSync(parent, { recursive: true, force: true });
 	});
 });

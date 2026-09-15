@@ -73,6 +73,9 @@ function fakeCtx(cwd: string, hasUI = false): ExtensionContext {
 		cwd,
 		hasUI,
 		ui: { notify: () => {}, setWidget: () => {} },
+		sessionManager: {
+			getSessionId: () => process.env.PI_SESSION_ID ?? "glue-test",
+		},
 	} as unknown as ExtensionContext;
 }
 
@@ -404,6 +407,7 @@ describe("disabledTools glue (US-002)", () => {
 		const ctx = {
 			cwd: root,
 			hasUI: true,
+			sessionManager: { getSessionId: () => "us002-glue" },
 			ui: {
 				notify: () => {},
 				setWidget: () => {
