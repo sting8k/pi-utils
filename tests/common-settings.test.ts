@@ -202,7 +202,7 @@ describe("loadSettings — repair pass (owner decision 2026-09-15)", () => {
 		const result = loadSettings(dir);
 		expect(result.created).toBe(false);
 		expect(result.settings.bashRouter.unwrapPrefixes).toEqual(["rtk"]);
-		expect(result.settings.edit).toEqual({ lang: "python", timeoutSec: 60 });
+		expect(result.settings.edit).toEqual({ lang: "python", timeoutSec: 10 });
 		expect(result.settings.disabledTools).toEqual([]);
 		// Custom values survive verbatim.
 		expect(result.settings.fsSearch.globMaxResults).toBe(42);

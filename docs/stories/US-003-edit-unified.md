@@ -125,6 +125,10 @@ exists to kill); `timeoutMs` → `timeout` (÷1000).
      pointer in result — same convention as fs-search).
    - `timeout` (default `edit.timeoutSec`) kills the whole tree; abort
      signal kills too.
+   - Calls serialize per path (in-process mutation queue, same intent as
+     core's withFileMutationQueue): two concurrent script calls touching
+     an overlapping path must not interleave — observed live: call B's
+     diff attributed call A's write when runs interleaved.
 3. Exit ≠ 0 / timeout / abort / spawn failure → **restore all declared
    paths from snapshot** → error result with `rolledBack: true`,
    `exitCode`, `stderr` excerpt, and which declared paths were left

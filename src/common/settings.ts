@@ -87,7 +87,7 @@ export const DEFAULT_SETTINGS: PiUtilsSettings = {
 	},
 	edit: {
 		lang: "python",
-		timeoutSec: 60,
+		timeoutSec: 10,
 	},
 	disabledTools: [],
 };

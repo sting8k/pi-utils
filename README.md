@@ -160,7 +160,7 @@ All settings live in `~/.pi/agent/pi-utils.json` — created with these defaults
   },
   "edit": {
     "lang": "python",
-    "timeoutSec": 60
+    "timeoutSec": 10
   },
   "disabledTools": []
 }
