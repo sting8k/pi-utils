@@ -77,3 +77,20 @@ Tradeoffs:
   `pi install npm:@sting8k/pi-utils` once published (mirrors pi-vcc). The
   README documents these two; the earlier "settings.json extensions array"
   recommendation was a pre-publish workaround and is now local-dev only.
+
+## Amendment — settings merge-missing-to-disk (2026-09-15, owner decision)
+
+The original decision 4 said missing keys are merged "in memory without rewriting
+the file". Amended: on every successful parse, missing top-level sections and
+missing keys inside existing object sections are added with their defaults and
+written back to disk (best-effort; read-only dirs skip the write, in-memory
+defaults still apply). Contract:
+
+- Existing values are NEVER touched — including values that fail validation
+  (those keep their in-memory default + warning, but the disk bytes stay).
+- Unknown keys the user added are never removed.
+- Array sections (`disabledTools`) are atomic: present means keep as-is.
+- The repair is silent; `SettingsLoadResult.repaired` records what was added
+  for later surfacing.
+- Parse errors still never touch the file.
+

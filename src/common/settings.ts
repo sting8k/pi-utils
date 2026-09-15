@@ -1,11 +1,14 @@
 /**
  * Settings for all pi-utils extensions — ONE file: <agentDir>/pi-utils.json.
  *
- * Decision 0008: single auto-scaffolded file, no per-extension or per-project
- * files. First run writes the full defaults template. Later runs fill missing
- * keys with defaults IN MEMORY without rewriting the file, and never overwrite
- * values the user edited. Parse errors fall back to defaults with warnings —
- * the caller surfaces them via ctx.ui.notify.
+ * Decision 0008 (amended 2026-09-15): single auto-scaffolded file, no
+ * per-extension or per-project files. First run writes the full defaults
+ * template. Later runs auto-add MISSING sections/keys with their defaults —
+ * both in memory and back to disk (best-effort, 2-space + trailing newline) —
+ * while never touching existing values (even invalid ones) and never removing
+ * unknown keys the user added. Parse errors fall back to defaults with
+ * warnings and leave the broken file untouched — the caller surfaces them via
+ * ctx.ui.notify.
  *
  * No imports from pi packages: agentDir is injected by the extension layer.
  */
@@ -95,6 +98,12 @@ export interface SettingsLoadResult {
 	warnings: string[];
 	/** True when the settings file was created by this call. */
 	created: boolean;
+	/**
+	 * Sections/keys added to the disk file by the repair pass (owner decision
+	 * 2026-09-15): e.g. "edit", "disabledTools", "fsSearch.graceMs". Empty
+	 * when nothing was missing or the file could not be written.
+	 */
+	repaired: string[];
 }
 
 export function settingsFilePath(agentDir: string): string {
@@ -169,6 +178,7 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 				settings: structuredClone(DEFAULT_SETTINGS),
 				warnings: [],
 				created: true,
+				repaired: [],
 			};
 		} catch {
 			// Cannot scaffold (permissions?) — still work with defaults.
@@ -176,6 +186,7 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 				settings: structuredClone(DEFAULT_SETTINGS),
 				warnings: [],
 				created: false,
+				repaired: [],
 			};
 		}
 	}
@@ -189,6 +200,8 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 			settings: structuredClone(DEFAULT_SETTINGS),
 			warnings: [`pi-utils.json parse error: ${message} — using defaults`],
 			created: false,
+			// Parse error: never touch the broken file — defaults in memory only.
+			repaired: [],
 		};
 	}
 
@@ -200,10 +213,41 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 			settings,
 			warnings: ["pi-utils.json is not a JSON object — using defaults"],
 			created: false,
+			repaired: [],
 		};
 	}
 
-	const fsRaw = parsed.fsSearch;
+	// Repair pass (owner decision 2026-09-15): add missing sections/keys with
+	// their defaults to the file — silently, best-effort. Existing values are
+	// never touched (even invalid ones) and unknown user keys are never
+	// removed; array sections (disabledTools) are atomic.
+	const merged = structuredClone(parsed) as Record<string, unknown>;
+	const repaired: string[] = [];
+	for (const [section, defaults] of Object.entries(DEFAULT_SETTINGS)) {
+		const current = merged[section];
+		if (current === undefined) {
+			merged[section] = structuredClone(defaults);
+			repaired.push(section);
+			continue;
+		}
+		if (!isRecord(current) || !isRecord(defaults)) continue; // atomic sections
+		const record = current as Record<string, unknown>;
+		for (const [key, value] of Object.entries(defaults)) {
+			if (!(key in record)) {
+				record[key] = structuredClone(value);
+				repaired.push(`${section}.${key}`);
+			}
+		}
+	}
+	if (repaired.length > 0) {
+		try {
+			writeFileSync(file, `${JSON.stringify(merged, null, 2)}\n`);
+		} catch {
+			// Read-only dir: skip the disk repair; in-memory defaults still apply.
+		}
+	}
+
+	const fsRaw = merged.fsSearch;
 	if (fsRaw === undefined) {
 		warnings.push('missing "fsSearch" section — using defaults');
 	} else if (isRecord(fsRaw)) {
@@ -221,7 +265,7 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 		warnings.push('"fsSearch" is not an object — using defaults');
 	}
 
-	const bgRaw = parsed.shellBg;
+	const bgRaw = merged.shellBg;
 	if (bgRaw === undefined) {
 		warnings.push('missing "shellBg" section — using defaults');
 	} else if (isRecord(bgRaw)) {
@@ -239,7 +283,7 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 
 	// bashRouter (Amendment A1): sections from pre-amendment settings files are
 	// filled silently — a warning toast on every session start would be noise.
-	const brRaw = parsed.bashRouter;
+	const brRaw = merged.bashRouter;
 	if (brRaw !== undefined) {
 		if (!isRecord(brRaw)) {
 			warnings.push('"bashRouter" is not an object — using defaults');
@@ -257,7 +301,7 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 
 	// disabledTools (US-002): a missing key stays silent — pre-existing settings
 	// files must not start warning (same precedent as bashRouter Amendment A1).
-	const dtRaw = parsed.disabledTools;
+	const dtRaw = merged.disabledTools;
 	if (dtRaw !== undefined) {
 		if (!Array.isArray(dtRaw)) {
 			warnings.push(
@@ -286,7 +330,7 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 	}
 
 	// edit (US-003): a missing section or key stays silent — same A1 precedent.
-	const eRaw = parsed.edit;
+	const eRaw = merged.edit;
 	if (eRaw !== undefined) {
 		if (!isRecord(eRaw)) {
 			warnings.push('"edit" is not an object — using defaults');
@@ -314,5 +358,5 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 		}
 	}
 
-	return { settings, warnings, created: false };
+	return { settings, warnings, created: false, repaired };
 }

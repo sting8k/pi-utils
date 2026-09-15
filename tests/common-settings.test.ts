@@ -188,3 +188,89 @@ describe("loadSettings — disabledTools (US-002)", () => {
 		expect(result.warnings.some((w) => w.includes("42"))).toBe(true);
 	});
 });
+
+describe("loadSettings — repair pass (owner decision 2026-09-15)", () => {
+	test("(a) v0.1.0-era file gains bashRouter/edit/disabledTools; existing values untouched", () => {
+		// bean's real file shape at v0.1.0: only the two original sections.
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({
+				fsSearch: { globMaxResults: 42 },
+				shellBg: { autoBackgroundMs: 45_000 },
+			}),
+		);
+		const result = loadSettings(dir);
+		expect(result.created).toBe(false);
+		expect(result.settings.bashRouter.unwrapPrefixes).toEqual(["rtk"]);
+		expect(result.settings.edit).toEqual({ lang: "python", timeoutSec: 60 });
+		expect(result.settings.disabledTools).toEqual([]);
+		// Custom values survive verbatim.
+		expect(result.settings.fsSearch.globMaxResults).toBe(42);
+		expect(result.settings.shellBg.autoBackgroundMs).toBe(45_000);
+
+		const onDisk = JSON.parse(readFileSync(settingsFilePath(dir), "utf8"));
+		expect(Object.keys(onDisk).sort()).toEqual([
+			"bashRouter",
+			"disabledTools",
+			"edit",
+			"fsSearch",
+			"shellBg",
+		]);
+		expect(onDisk.fsSearch.globMaxResults).toBe(42);
+		expect(onDisk.shellBg.autoBackgroundMs).toBe(45_000);
+		expect(result.repaired.sort()).toEqual([
+			"bashRouter",
+			"disabledTools",
+			"edit",
+			"fsSearch.graceMs",
+			"fsSearch.grepMaxLineBytes",
+			"fsSearch.grepMaxMatches",
+			"fsSearch.noIgnore",
+			"fsSearch.rawOutputMaxBytes",
+			"fsSearch.timeoutMs",
+			"shellBg.killGraceMs",
+			"shellBg.tailBytes",
+		]);
+	});
+
+	test("(b) repair fills missing keys inside existing sections, verbatim customs kept", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({ fsSearch: { globMaxResults: 42 } }),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.fsSearch.globMaxResults).toBe(42);
+		expect(result.settings.fsSearch.graceMs).toBe(3_000); // default filled
+		expect(result.repaired).toContain("fsSearch.graceMs");
+	});
+
+	test("(c) unknown user keys are preserved through the repair write", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({
+				fsSearch: { globMaxResults: 42, myComment: "hands off" },
+				futureSection: { whatever: true },
+			}),
+		);
+		loadSettings(dir);
+		const onDisk = JSON.parse(readFileSync(settingsFilePath(dir), "utf8"));
+		expect(onDisk.fsSearch.myComment).toBe("hands off");
+		expect(onDisk.futureSection).toEqual({ whatever: true });
+	});
+
+	test("(d) complete file: no repair, no rewrite", () => {
+		const original = `${JSON.stringify(DEFAULT_SETTINGS, null, 2)}\n`;
+		writeFileSync(settingsFilePath(dir), original);
+		const result = loadSettings(dir);
+		expect(result.repaired).toEqual([]);
+		expect(readFileSync(settingsFilePath(dir), "utf8")).toBe(original);
+	});
+
+	test("(e) parse error: defaults in memory, broken file NOT overwritten", () => {
+		writeFileSync(settingsFilePath(dir), "{ not json");
+		const result = loadSettings(dir);
+		expect(result.settings).toEqual(DEFAULT_SETTINGS);
+		expect(result.repaired).toEqual([]);
+		expect(readFileSync(settingsFilePath(dir), "utf8")).toBe("{ not json");
+	});
+});
