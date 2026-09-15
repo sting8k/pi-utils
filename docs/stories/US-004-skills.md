@@ -47,8 +47,6 @@ improve (skill_write patch) → repeat
   (see below; `skill_view` does NOT exist)
 - frontmatter validation — minimal (native diagnostics own the
   format; we validate just enough to never write a broken file)
-- path-guard — our `edit`/`write` overrides refuse
-  `<skills_root>/**/SKILL.md` → "use skill_write"
 - prompt rules block — small static section appended via
   `before_agent_start` (the hook ctx-kit already proves exists)
 - optional iteration nudge — `skills.nudge_interval`, default off
@@ -66,8 +64,11 @@ write approval, security scan, hub/sync, batch `write_file` ops,
 - Memory is out of scope (user's own system); skills hold
   task-class knowledge only.
 - skills_root = `~/.pi/agent/skills` (native user dir).
-- `skill_write` is the funnel — exists for guards + future hooks,
-  not file-writing convenience.
+- `skill_write` is the *preferred* funnel — exists for guards +
+  future hooks, not file-writing convenience. No path-guard:
+  agents may bypass via generic tools (owner decision — 'if it
+  wants to edit, let it edit'); read-before-write still holds
+  inside skill_write itself.
 - No background fork — prompt rules + optional counter nudge only.
 - Supporting files (`references/` etc.) use generic file tools —
   `skill_write` guards `SKILL.md` only.
@@ -127,13 +128,6 @@ error message names the way out.
 - `patch`/`delete`: frontmatter checks skipped — existing skills
   stay maintainable; every rejection names the fix.
 
-### Path-guard
-
-In our `edit`/`write` overrides: resolved target matching
-`<skills_root>/**/SKILL.md` → error `"SKILL.md is managed — use
-skill_write (enforces format + read-before-write)"`. Generic tools
-still freely touch `references/` and everything else.
-
 ### Prompt rules block
 
 Appended via `before_agent_start` (same hook ctx-kit uses — proven
@@ -163,10 +157,6 @@ since last `skill_write`; at threshold append to next tool result:
 - new: `extensions/skill-write.ts` — tool registration (follow
   `extensions/edit.ts`: registry, schema, `droidToolRender`)
 - new: `src/skills/` — frontmatter parse, guard tracking, write ops
-- touch: `extensions/edit.ts` — path-guard (script-mode: check declared
-  `paths` against skills_root prefix)
-- new: thin `write` override (edit.ts registry pattern) — exists ONLY
-  for the path-guard; repo has no write override today
 - touch: `src/common/settings.ts` — `skills.nudge_interval`
   (skills_root fixed to native default; `skills.dir` only if bean
   wants override)
@@ -191,7 +181,6 @@ since last `skill_write`; at threshold append to next tool result:
   `index_preview`
 - patch on unviewed existing skill → read-before-write error; after
   `read()` → applies
-- direct `write`/`edit` to a SKILL.md → path-guard error
 - `bash cat` then patch → still refused (guard keys on read tool)
 - delete → gone; bad frontmatter create → rejected with fixable
   message; failed multi-step → rolled back
@@ -200,7 +189,7 @@ since last `skill_write`; at threshold append to next tool result:
 ## Validation
 
 - `bun run check` green; unit tests for frontmatter validation,
-  read-before-write tracking, path-guard, snapshot rollback
+  read-before-write tracking, snapshot rollback
 - live smoke in real pi session (native index pickup is the proof
   that the loop closes)
 
