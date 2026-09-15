@@ -38,10 +38,18 @@ export interface BashRouterSettings {
 	unwrapPrefixes: string[];
 }
 
+export interface EditSettings {
+	/** Script-mode interpreter (US-003): "python" | "node". */
+	lang: "python" | "node";
+	/** Script-mode timeout in seconds; the whole process tree is killed past it. */
+	timeoutSec: number;
+}
+
 export interface PiUtilsSettings {
 	fsSearch: FsSearchSettings;
 	shellBg: ShellBgSettings;
 	bashRouter: BashRouterSettings;
+	edit: EditSettings;
 	/** Tools skipped at registration time (US-002). Names must be in KNOWN_TOOLS. */
 	disabledTools: string[];
 }
@@ -53,6 +61,7 @@ export const KNOWN_TOOLS = [
 	"bash",
 	"shell_status",
 	"shell_kill",
+	"edit",
 ] as const;
 
 export const DEFAULT_SETTINGS: PiUtilsSettings = {
@@ -72,6 +81,10 @@ export const DEFAULT_SETTINGS: PiUtilsSettings = {
 	},
 	bashRouter: {
 		unwrapPrefixes: ["rtk"],
+	},
+	edit: {
+		lang: "python",
+		timeoutSec: 60,
 	},
 	disabledTools: [],
 };
@@ -269,6 +282,35 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 				);
 			}
 			settings.disabledTools = [...seen];
+		}
+	}
+
+	// edit (US-003): a missing section or key stays silent — same A1 precedent.
+	const eRaw = parsed.edit;
+	if (eRaw !== undefined) {
+		if (!isRecord(eRaw)) {
+			warnings.push('"edit" is not an object — using defaults');
+		} else {
+			if ("lang" in eRaw) {
+				const lang = eRaw.lang;
+				if (lang === "python" || lang === "node") {
+					settings.edit.lang = lang;
+				} else {
+					warnings.push(
+						`"edit.lang" invalid (${JSON.stringify(lang)}) — using default`,
+					);
+				}
+			}
+			if ("timeoutSec" in eRaw) {
+				const value = positiveInt(eRaw.timeoutSec);
+				if (value === undefined) {
+					warnings.push(
+						`"edit.timeoutSec" invalid (${JSON.stringify(eRaw.timeoutSec)}) — using default`,
+					);
+				} else {
+					settings.edit.timeoutSec = value;
+				}
+			}
 		}
 	}
 

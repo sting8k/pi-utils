@@ -30,7 +30,7 @@ For local development:
 ```sh
 git clone https://github.com/sting8k/pi-utils && cd pi-utils
 bun install
-pi -e ./extensions/fs-search.ts -e ./extensions/shell-bg.ts
+pi -e ./extensions/fs-search.ts -e ./extensions/shell-bg.ts -e ./extensions/edit.ts
 ```
 
 Requires `rg` on `PATH` (or run Pi's built-in grep once so Pi downloads ripgrep into `~/.pi/agent/bin`).
@@ -106,9 +106,30 @@ In interactive sessions, finished jobs deliver themselves into the conversation 
 
 A widget above the editor lists running jobs — one line per job (`• Jobs · N running`, tree connectors, live elapsed) — and clears itself when the last job settles.
 
+## edit: script-mode editing
+
+`edit` overrides Pi's built-in with a script-only form: the model passes a python or node script plus the files it may touch, and the result is the **unified diff in the model's own context** — the verification surface. Structured anchored replacement is intentionally not part of this tool; that niche belongs to dedicated anchored-edit tools.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `code` | yes | python/node script source (passed on stdin) |
+| `paths` | yes | **every** file the script may touch |
+| `lang` | no | `"python"` (default) or `"node"` |
+| `timeout` | no | seconds; whole process tree killed past it (default 60) |
+
+The contract, stated plainly:
+
+- **`paths` is the boundary.** The tool snapshots, diffs, and rolls back exactly the declared paths — no git, no `.git` detection, one code path in git and non-git directories. Writes outside `paths` are invisible to it; declaring every target file is the model's responsibility.
+- **Rollback on failure.** Nonzero exit, timeout, or abort restores every declared path to its snapshot bytes (files the script created are deleted). The error result reports what was touched before the restore.
+- **Review the diff.** A script that matched nothing still exits 0 — a no-op run returns a prominent `no declared file changed` warning instead of silently pretending success.
+- **Not a security boundary.** The script runs with full user privileges. The tool adds declared intent, diff review, and rollback — an ergonomics and safety layer, not a sandbox.
+- Stray structured-form fields (`path`, `edits`, `oldText`, …) are a hard error naming the fix — the tool only runs scripts.
+
+`edit` joins `disabledTools` (below): disabling it leaves Pi's built-in edit in charge.
+
 ## Styling: droid-styling adaptation
 
-When [`@sting8k/pi-droid-styling`](https://www.npmjs.com/package/@sting8k/pi-droid-styling) is present, all five tools render in its boxed style automatically — pi-utils borrows its renderer primitives at session start, so colors, width, and expand behavior follow your droid-styling config. Without it, pi's default tool rendering is used. No hard dependency either way:
+When [`@sting8k/pi-droid-styling`](https://www.npmjs.com/package/@sting8k/pi-droid-styling) is present, all six tools render in its boxed style automatically — pi-utils borrows its renderer primitives at session start, so colors, width, and expand behavior follow your droid-styling config. Without it, pi's default tool rendering is used. No hard dependency either way:
 
 - both installed via `pi install npm:` → resolves automatically (flat `~/.pi/agent/npm/node_modules`)
 - developing side by side → `devDependencies` `"file:../pi-droid-styling"` symlink (already configured here)
@@ -137,6 +158,10 @@ All settings live in `~/.pi/agent/pi-utils.json` — created with these defaults
   "bashRouter": {
     "unwrapPrefixes": ["rtk"]
   },
+  "edit": {
+    "lang": "python",
+    "timeoutSec": 60
+  },
   "disabledTools": []
 }
 ```
@@ -145,7 +170,7 @@ All settings live in `~/.pi/agent/pi-utils.json` — created with these defaults
 
 `disabledTools` is a list of pi-utils tool names that are skipped at
 registration time — turn off one tool, keep the rest of the module running.
-Valid names are `grep`, `glob`, `bash`, `shell_status`, `shell_kill`. The key
+Valid names are `grep`, `glob`, `bash`, `shell_status`, `shell_kill`, `edit`. The key
 is optional (absent or empty = everything registers); unknown names produce a
 warning and are dropped, duplicates dedupe.
 
@@ -159,6 +184,8 @@ What happens when a tool is disabled:
 - `bash` — pi's built-in bash stays in charge. `bash` is a cluster head:
   disabling it also removes `shell_status`, `shell_kill`, and the Jobs widget
   (with the override off, no background jobs can exist)
+- `edit` — pi's built-in edit stays in charge (the script-mode override is
+  unregistered)
 - `glob`, `shell_status`, `shell_kill` — pi has no native equivalent, so the
   tool is simply absent
 

@@ -6,13 +6,14 @@
  * scaffold, rg fallback) never touches the real ~/.pi/agent.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_SETTINGS } from "../src/common/settings.ts";
 
 interface Captured {
 	tools: Array<
@@ -420,5 +421,84 @@ describe("disabledTools glue (US-002)", () => {
 		expect(widgetsWired).toBe(0);
 		// Commands stay available; only the tools/widget cluster goes.
 		expect(captured.commands.map((c) => c.name)).toEqual(["shell-bg"]);
+	});
+});
+
+describe("edit glue (US-003)", () => {
+	test("registers the edit override (script-only schema)", async () => {
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/edit.ts");
+		mod.default(api);
+		const edit = captured.tools.find((t) => t.name === "edit");
+		expect(edit).toBeTruthy();
+		expect(edit?.description).toContain("script");
+		// Steering lives in promptGuidelines (4 bullets), not the description.
+		expect(edit?.promptGuidelines).toHaveLength(4);
+	});
+
+	test('edit is skipped under disabledTools: ["edit"]', async () => {
+		writeFileSync(
+			join(agentDir, "pi-utils.json"),
+			JSON.stringify({ disabledTools: ["edit"] }),
+		);
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/edit.ts");
+		mod.default(api);
+		expect(captured.tools).toEqual([]);
+		// Restore defaults so later reads see a clean settings file.
+		writeFileSync(
+			join(agentDir, "pi-utils.json"),
+			JSON.stringify(DEFAULT_SETTINGS),
+		);
+	});
+
+	test("edit execute: script modifies a file; diff lands in content + details", async () => {
+		const target = join(root, "edit-glue.txt");
+		writeFileSync(target, "alpha\nbeta\n");
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/edit.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const edit = captured.tools.find((t) => t.name === "edit");
+		if (!edit) throw new Error("edit tool missing");
+		const result = (await edit.execute(
+			"e1",
+			{
+				code: `const fs = require("node:fs");\nfs.writeFileSync(${JSON.stringify(target)}, "alpha\\nBETA\\n");`,
+				paths: ["edit-glue.txt"],
+				lang: "node",
+			},
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as {
+			content: Array<{ type: string; text: string }>;
+			details: { diff: string; patch: string; filesChanged: string[] };
+		};
+		expect(result.content[0]?.text).toContain("script edit: 1 file(s) changed");
+		expect(result.content[0]?.text).toContain("+ BETA");
+		expect(result.details.filesChanged).toEqual(["edit-glue.txt"]);
+		expect(result.details.patch).toContain("--- a/edit-glue.txt");
+		expect(readFileSync(target, "utf8")).toBe("alpha\nBETA\n");
+	});
+
+	test("edit execute: stray structured field is a hard error naming the fix", async () => {
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/edit.ts");
+		mod.default(api);
+		const edit = captured.tools.find((t) => t.name === "edit");
+		if (!edit) throw new Error("edit tool missing");
+		try {
+			await edit.execute(
+				"e2",
+				{ code: "print(1)", paths: ["x.txt"], path: "x.txt" },
+				undefined,
+				undefined,
+				fakeCtx(root),
+			);
+			expect.unreachable();
+		} catch (err) {
+			expect(String(err)).toContain('"path" is not a field');
+		}
 	});
 });

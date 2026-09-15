@@ -297,3 +297,44 @@ export function simpleRenderers(title: string) {
 		},
 	});
 }
+
+// ── edit ────────────────────────────────────────────────────────────
+
+/** Script-mode edit: compact call shows the declared paths. */
+export function editRenderers(droid: DroidRenderers) {
+	const detail = (args: Record<string, unknown> | undefined): string => {
+		const paths = Array.isArray(args?.paths) ? args.paths : [];
+		const lang = String(args?.lang ?? "");
+		const shown = paths.length > 2 ? `${paths.length} paths` : paths.join(", ");
+		return lang ? `${shown} (${lang})` : shown;
+	};
+	return {
+		renderCall(
+			args: Record<string, unknown> | undefined,
+			theme: unknown,
+			context: RenderContext,
+		) {
+			return compactCall(droid, "Edit", detail(args), {
+				...context,
+				theme,
+				args,
+			});
+		},
+		renderResult(
+			result: RenderResultContext["result"],
+			options: unknown,
+			theme: unknown,
+			context: RenderContext,
+		) {
+			return boxedResult(droid, "Edit", detail(context.args), {
+				result,
+				options,
+				theme,
+				state: context.state,
+				isError: context.isError,
+				isPartial: context.isPartial,
+				args: context.args,
+			});
+		},
+	};
+}

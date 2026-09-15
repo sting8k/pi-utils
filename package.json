@@ -31,7 +31,8 @@
 	"pi": {
 		"extensions": [
 			"./extensions/fs-search.ts",
-			"./extensions/shell-bg.ts"
+			"./extensions/shell-bg.ts",
+			"./extensions/edit.ts"
 		]
 	},
 	"peerDependenciesMeta": {
