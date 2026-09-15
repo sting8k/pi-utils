@@ -528,3 +528,185 @@ describe("edit glue (US-003)", () => {
 		}
 	});
 });
+
+describe("skill_write glue (US-004)", () => {
+	// DEFAULT_SETTINGS (restored by the edit-glue tests) ships skill_write
+	// disabled — the layer is opt-in; these tests opt in explicitly.
+	function enableSkillWrite(): void {
+		writeFileSync(
+			join(agentDir, "pi-utils.json"),
+			JSON.stringify({ disabledTools: [] }),
+		);
+	}
+
+	const SKILL_CONTENT = (name: string) =>
+		`---\nname: ${name}\ndescription: use when glue testing\n---\n\n# ${name}\n\nRules with why.\n`;
+
+	test("registers skill_write", async () => {
+		enableSkillWrite();
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/skill-write.ts");
+		mod.default(api);
+		expect(captured.tools.map((t) => t.name)).toContain("skill_write");
+	});
+
+	test('kill-switch: disabledTools ["skill_write"] kills tool + hooks', async () => {
+		const tmp = join(root, "kill-agent");
+		mkdirSync(tmp, { recursive: true });
+		writeFileSync(
+			join(tmp, "pi-utils.json"),
+			JSON.stringify({ disabledTools: ["skill_write"] }),
+		);
+		const prev = process.env.PI_CODING_AGENT_DIR;
+		process.env.PI_CODING_AGENT_DIR = tmp;
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/skill-write.ts");
+		mod.default(api);
+		process.env.PI_CODING_AGENT_DIR = prev;
+		expect(captured.tools).toEqual([]);
+		const before = captured.handlers.get("before_agent_start") ?? [];
+		const native = "pre\n<available_skills></available_skills>\npost";
+		for (const handler of before) {
+			expect(
+				await handler(
+					{ type: "before_agent_start", prompt: "", systemPrompt: native },
+					fakeCtx(root),
+				),
+			).toBeUndefined();
+		}
+	});
+
+	test("before_agent_start: smart transform + rules block; native keeps block byte-identical", async () => {
+		enableSkillWrite();
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/skill-write.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const before = captured.handlers.get("before_agent_start") ?? [];
+		expect(before.length).toBeGreaterThan(0);
+
+		const native = [
+			"header",
+			"<available_skills>",
+			"  <skill>",
+			"    <name>glue-skill</name>",
+			"    <description>use when glue testing</description>",
+			`    <location>${join(agentDir, "skills", "glue-skill", "SKILL.md")}</location>`,
+			"  </skill>",
+			"</available_skills>",
+			"footer",
+		].join("\n");
+		const result = (await before[0]?.(
+			{ type: "before_agent_start", prompt: "", systemPrompt: native },
+			fakeCtx(root),
+		)) as { systemPrompt: string };
+		expect(result.systemPrompt).toContain('<skill name="glue-skill"');
+		expect(result.systemPrompt).toContain("## Skills"); // rules block appended
+
+		// native mode: block passthrough byte-identical, rules still appended.
+		writeFileSync(
+			join(agentDir, "pi-utils.json"),
+			JSON.stringify({ disabledTools: [], skills: { index: "native" } }),
+		);
+		const { api: api2, captured: captured2 } = fakePi();
+		const mod2 = await import("../extensions/skill-write.ts");
+		mod2.default(api2);
+		await startSession(captured2, fakeCtx(root));
+		const before2 = captured2.handlers.get("before_agent_start") ?? [];
+		const result2 = (await before2[0]?.(
+			{ type: "before_agent_start", prompt: "", systemPrompt: native },
+			fakeCtx(root),
+		)) as { systemPrompt: string };
+		expect(result2.systemPrompt.startsWith(native)).toBe(true);
+		expect(result2.systemPrompt).toContain("## Skills");
+	});
+
+	test("guard: patch refused before read, allowed after (via handler wiring); create works", async () => {
+		enableSkillWrite();
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/skill-write.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const skillWrite = captured.tools.find((t) => t.name === "skill_write");
+		if (!skillWrite) throw new Error("skill_write missing");
+
+		const created = (await skillWrite.execute(
+			"c1",
+			{
+				name: "guard-skill",
+				action: "create",
+				content: SKILL_CONTENT("guard-skill"),
+			},
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+		expect(created.isError).toBeUndefined();
+		expect(created.content[0]?.text).toContain("skill created:");
+		expect(
+			readFileSync(join(agentDir, "skills", "guard-skill", "SKILL.md"), "utf8"),
+		).toContain("Rules with why.");
+
+		const refused = (await skillWrite.execute(
+			"p0",
+			{
+				name: "guard-skill",
+				action: "patch",
+				old_string: "why.",
+				new_string: "why, now.",
+			},
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+		expect(refused.isError).toBe(true);
+		expect(refused.content[0]?.text).toMatch(/Read the skill first: read\(/);
+
+		// Read via the extension's own tool_call/tool_result handlers → seen.
+		const callHandlers = captured.handlers.get("tool_call") ?? [];
+		const resultHandlers = captured.handlers.get("tool_result") ?? [];
+		const skillMd = join(agentDir, "skills", "guard-skill", "SKILL.md");
+		for (const handler of callHandlers) {
+			await handler(
+				{
+					type: "tool_call",
+					toolCallId: "r1",
+					toolName: "read",
+					input: { path: skillMd },
+				},
+				fakeCtx(root),
+			);
+		}
+		for (const handler of resultHandlers) {
+			await handler(
+				{ type: "tool_result", toolCallId: "r1", content: [], isError: false },
+				fakeCtx(root),
+			);
+		}
+		const patched = (await skillWrite.execute(
+			"p1",
+			{
+				name: "guard-skill",
+				action: "patch",
+				old_string: "why.",
+				new_string: "why, now.",
+			},
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+		expect(patched.isError).toBeUndefined();
+		expect(patched.content[0]?.text).toContain("skill patched:");
+		expect(readFileSync(skillMd, "utf8")).toContain("why, now.");
+
+		const deleted = (await skillWrite.execute(
+			"d1",
+			{ name: "guard-skill", action: "delete" },
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+		expect(deleted.isError).toBeUndefined();
+		expect(deleted.content[0]?.text).toContain("skill deleted");
+	});
+});

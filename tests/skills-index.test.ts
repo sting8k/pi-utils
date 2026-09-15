@@ -1,0 +1,229 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseSkillFile } from "../src/skills/frontmatter.ts";
+import {
+	categoryOf,
+	transformSkillsIndex,
+} from "../src/skills/index-transform.ts";
+
+let root = "";
+let metaCache: Map<string, ReturnType<typeof Object>>;
+
+/** Native-format <available_skills> block, as pi 0.85.1 renders it. */
+function nativeBlock(
+	entries: Array<[name: string, description: string, location: string]>,
+): string {
+	const lines = ["<available_skills>"];
+	for (const [name, description, location] of entries) {
+		lines.push("  <skill>");
+		lines.push(`    <name>${name}</name>`);
+		lines.push(`    <description>${description}</description>`);
+		lines.push(`    <location>${location}</location>`);
+		lines.push("  </skill>");
+	}
+	lines.push("</available_skills>");
+	return lines.join("\n");
+}
+
+function skill(
+	name: string,
+	frontmatter: Record<string, unknown>,
+	category?: string,
+	blockDesc?: string,
+): [string, string, string] {
+	const dir = join(root, ...(category ? [category] : []), name);
+	mkdirSync(dir, { recursive: true });
+	const fm = Object.entries(frontmatter)
+		.map(([k, v]) =>
+			Array.isArray(v) ? `${k}: [${v.join(", ")}]` : `${k}: ${String(v)}`,
+		)
+		.join("\n");
+	const content = `---\n${fm}\n---\n\nbody\n`;
+	writeFileSync(join(dir, "SKILL.md"), content);
+	return [name, blockDesc ?? `desc of ${name}`, join(dir, "SKILL.md")];
+}
+
+beforeAll(() => {
+	root = mkdtempSync(join(tmpdir(), "pi-utils-skills-index-"));
+	metaCache = new Map();
+});
+afterAll(() => {
+	rmSync(root, { recursive: true, force: true });
+});
+
+function transform(
+	entries: Array<[string, string, string]>,
+	opts: {
+		hostPlatform?: string;
+		fullLimit?: number;
+		recentlyUsed?: string[];
+		requires?: (bin: string) => boolean;
+	} = {},
+) {
+	const prompt = `preamble\n${nativeBlock(entries)}\nepilogue`;
+	return {
+		prompt,
+		result: transformSkillsIndex(
+			prompt,
+			opts.fullLimit ?? 50,
+			opts.recentlyUsed ?? [],
+			{
+				skillsRoot: root,
+				hostPlatform: opts.hostPlatform ?? "darwin",
+				requiresCheck: opts.requires ?? (() => true),
+				metaCache,
+			},
+		),
+	};
+}
+
+describe("smart index transform (US-004)", () => {
+	test("keeps the native tag name and re-emits one-line entries", () => {
+		const entries = [
+			skill("alpha", { name: "alpha", description: "desc of alpha" }),
+		];
+		const { prompt, result } = transform(entries);
+		expect(result).not.toBeNull();
+		if (!result) return;
+		expect(result.block.startsWith("<available_skills>")).toBe(true);
+		expect(result.block).toMatch(/<skill name="alpha" location=/);
+		// Spliced back into the prompt: native header/epilogue survive.
+		const spliced =
+			prompt.slice(0, result.start) + result.block + prompt.slice(result.end);
+		expect(spliced).toContain("preamble");
+		expect(spliced).toContain("desc of alpha");
+	});
+
+	test("platforms: windows-only skill hidden on darwin", () => {
+		const entries = [
+			skill("win-only", {
+				name: "win-only",
+				description: "d",
+				platforms: ["windows"],
+			}),
+			skill("mac-ok", {
+				name: "mac-ok",
+				description: "d",
+				platforms: ["windows", "macos"],
+			}),
+		];
+		const { result } = transform(entries);
+		if (!result) return expect(result).not.toBeNull();
+		expect(result.hidden).toEqual(["win-only"]);
+		expect(result.block).toContain('"mac-ok"');
+		expect(result.block).not.toContain('"win-only"');
+		expect(result.block).toMatch(/1 more — ls .+ or \/skill:<name>/);
+	});
+
+	test("requires: missing binary hides", () => {
+		const entries = [
+			skill("needs-tool", {
+				name: "needs-tool",
+				description: "d",
+				requires: ["bogus-bin-us004"],
+			}),
+		];
+		const { result } = transform(entries, {
+			requires: (bin) => bin !== "bogus-bin-us004",
+		});
+		if (!result) return expect(result).not.toBeNull();
+		expect(result.hidden).toEqual(["needs-tool"]);
+	});
+
+	test("disable-model-invocation hidden (belt-and-suspenders)", () => {
+		const entries = [
+			skill("slash-only", {
+				name: "slash-only",
+				description: "d",
+				"disable-model-invocation": true,
+			}),
+		];
+		const { result } = transform(entries);
+		if (!result) return expect(result).not.toBeNull();
+		expect(result.hidden).toEqual(["slash-only"]);
+	});
+
+	test("over-limit: categories without recently-used collapse to names-only", () => {
+		const entries = [
+			skill("c1-a", { name: "c1-a", description: "d" }, "cat1"),
+			skill("c1-b", { name: "c1-b", description: "d" }, "cat1"),
+			skill("c2-a", { name: "c2-a", description: "d" }, "cat2"),
+			skill("c2-b", { name: "c2-b", description: "d" }, "cat2"),
+			skill("c2-c", { name: "c2-c", description: "d" }, "cat2"),
+		];
+		// limit 3: cat2 (3 skills) over, cat1 (2) fits — but cat1 has no recent
+		// skill either; total visible 5 > 3 and BOTH categories demote when
+		// none recently used. cat2 with a recently-used skill stays full.
+		const { result } = transform(entries, {
+			fullLimit: 3,
+			recentlyUsed: [join(root, "cat2", "c2-a", "SKILL.md")],
+		});
+		if (!result) return expect(result).not.toBeNull();
+		expect(result.block).toMatch(
+			/<collapsed category="cat1">c1-a, c1-b<\/collapsed>/,
+		);
+		expect(result.block).toContain('"c2-a"'); // full entry kept
+		expect(result.demoted).toEqual(["c1-a", "c1-b"]);
+	});
+
+	test("quality flags: malformed frontmatter and desc overlap", () => {
+		const dupDir = join(root, "dup");
+		mkdirSync(dupDir, { recursive: true });
+		writeFileSync(join(dupDir, "SKILL.md"), "---\nname: [broken\n---\n\nx\n");
+		const entries: Array<[string, string, string]> = [
+			["dup", "use when deploying the service", join(dupDir, "SKILL.md")],
+			skill(
+				"dup2",
+				{ name: "dup2", description: "use when deploying the service" },
+				undefined,
+				"use when deploying the service",
+			),
+			skill("clean", { name: "clean", description: "unrelated description" }),
+		];
+		const { result } = transform(entries);
+		if (!result) return expect(result).not.toBeNull();
+		expect(result.flagged).toContain("dup");
+		expect(result.flagged).toContain("dup2");
+		expect(result.block).toMatch(/⚠ malformed frontmatter/);
+		expect(result.block).toMatch(
+			/⚠ possible overlap dup2≈dup|⚠ possible overlap dup≈dup2/,
+		);
+	});
+
+	test("unparseable / missing native block → passthrough (null)", () => {
+		expect(
+			transformSkillsIndex("no block at all", 50, [], {
+				skillsRoot: root,
+				hostPlatform: "darwin",
+				requiresCheck: () => true,
+				metaCache,
+			}),
+		).toBeNull();
+		const broken =
+			"pre\n<available_skills>\n  totally not xml\n</available_skills>\npost";
+		expect(
+			transformSkillsIndex(broken, 50, [], {
+				skillsRoot: root,
+				hostPlatform: "darwin",
+				requiresCheck: () => true,
+				metaCache,
+			}),
+		).toBeNull();
+	});
+
+	test("categoryOf: skill-dir parent relative to root; general/other fallbacks", () => {
+		expect(categoryOf(join(root, "cat", "x", "SKILL.md"), root)).toBe("cat");
+		expect(categoryOf(join(root, "name", "SKILL.md"), root)).toBe("general");
+		expect(categoryOf("/outside/anywhere/SKILL.md", root)).toBe("other");
+	});
+
+	test("parsed metadata actually comes from the shared parser", () => {
+		skill("meta", { name: "meta", description: "d", platforms: ["linux"] });
+		const parsed = parseSkillFile(
+			`---\nname: meta\ndescription: d\nplatforms: [linux]\n---\n\nbody\n`,
+		);
+		expect(parsed.ok).toBe(true);
+	});
+});

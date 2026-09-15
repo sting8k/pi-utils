@@ -338,3 +338,42 @@ export function editRenderers(droid: DroidRenderers) {
 		},
 	};
 }
+
+/** skill_write (US-004): compact box, detail = "action name/category". */
+export function skillWriteRenderers(droid: DroidRenderers) {
+	const detail = (args: Record<string, unknown> | undefined): string => {
+		const action = String(args?.action ?? "");
+		const name = String(args?.name ?? "");
+		const category = args?.category ? `${args.category}/` : "";
+		return `${action} ${category}${name}`.trim();
+	};
+	return {
+		renderCall(
+			args: Record<string, unknown> | undefined,
+			theme: unknown,
+			context: RenderContext,
+		) {
+			return compactCall(droid, "Skill", detail(args), {
+				...context,
+				theme,
+				args,
+			});
+		},
+		renderResult(
+			result: RenderResultContext["result"],
+			options: unknown,
+			theme: unknown,
+			context: RenderContext,
+		) {
+			return boxedResult(droid, "Skill", detail(context.args), {
+				result,
+				options,
+				theme,
+				state: context.state,
+				isError: context.isError,
+				isPartial: context.isPartial,
+				args: context.args,
+			});
+		},
+	};
+}

@@ -1,7 +1,7 @@
 {
 	"name": "@sting8k/pi-utils",
 	"version": "0.2.0",
-	"description": "Utility extensions for the Pi coding agent: deep fs-search (grep/glob) and background shell (shell-bg)",
+	"description": "Utility extensions for the Pi coding agent: deep fs-search (grep/glob), background shell (shell-bg), script-mode edit, and the skills write layer (skill_write)",
 	"type": "module",
 	"license": "MIT",
 	"keywords": [
@@ -32,12 +32,16 @@
 		"extensions": [
 			"./extensions/fs-search.ts",
 			"./extensions/shell-bg.ts",
-			"./extensions/edit.ts"
+			"./extensions/edit.ts",
+			"./extensions/skill-write.ts"
 		]
 	},
 	"peerDependenciesMeta": {
 		"@sting8k/pi-droid-styling": {
 			"optional": true
 		}
+	},
+	"dependencies": {
+		"yaml": "^2.9.0"
 	}
 }

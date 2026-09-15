@@ -1,6 +1,6 @@
 # pi-utils
 
-Utility extensions for the [Pi coding agent](https://github.com/earendil-works/pi): a deep filesystem search (`grep` / `glob`) that also searches gitignored files, and a background shell (`shell-bg`) so long-running commands never eat the agent's turn while it waits.
+Utility extensions for the [Pi coding agent](https://github.com/earendil-works/pi): a deep filesystem search (`grep` / `glob`) that also searches gitignored files, a background shell (`shell-bg`) so long-running commands never eat the agent's turn while it waits, script-mode editing (`edit`), and a self-improving skills write layer (`skill_write`).
 
 ## Features
 
@@ -9,9 +9,11 @@ Utility extensions for the [Pi coding agent](https://github.com/earendil-works/p
 - `bash` (overrides the built-in): commands still running after 30s auto-move to the background, `background: true` starts detached immediately, `timeout: N` kills the whole process tree
 - `bash` search auto-routing: standalone `rg` / `grep` / `find` commands run on the fs-search cores (caps, spill files, formatted rows) instead of a raw shell — anything the matcher cannot prove 1:1 falls through to bash unchanged. A wrapper whitelist (`bashRouter.unwrapPrefixes`, default `["rtk"]`) also routes prefixed commands like `rtk rg …` (pi-ctx-kit rewriting); unknown wrappers like `sudo` never strip
 - `shell_status` / `shell_kill`: poll, list, and stop background jobs; finished results are delivered into the conversation automatically
+- `edit` (overrides the built-in): script-mode editing — pass `code` + `paths`, get the unified diff back; declared paths are snapshotted and rolled back on failure
+- `skill_write`: the write half of the self-improving skills loop — create/patch/delete `SKILL.md` under `~/.pi/agent/skills/` with snapshot rollback, a read-before-write guard (bash `cat` doesn't count), and minimal frontmatter validation. One `before_agent_start` pass also re-renders Pi's native `<available_skills>` index (`skills.index: smart` hides by `platforms`/`requires`, collapses over-limit categories to names-only, flags malformed frontmatter and near-duplicate descriptions) and appends a skills rules block. Nudge (`skills.nudgeInterval`, default 10, `0` off) reminds the agent to save lessons. The layer ships opt-in: the scaffolded settings include `"skill_write"` in `disabledTools` — removing that entry turns on the tool, the index transform, and the nudge together (`["skill_write"]` in a custom file kills the whole layer)
 - `/shell-bg` command and a live widget above the editor showing running jobs
 - One settings file, `~/.pi/agent/pi-utils.json`, auto-scaffolded with defaults on first run
-- Zero runtime dependencies beyond the Pi package; ripgrep is reused from `PATH` or Pi's managed bin dir
+- Runtime deps: the Pi package plus `yaml` (frontmatter parsing); ripgrep is reused from `PATH` or Pi's managed bin dir
 
 ## Installation
 
@@ -30,7 +32,7 @@ For local development:
 ```sh
 git clone https://github.com/sting8k/pi-utils && cd pi-utils
 bun install
-pi -e ./extensions/fs-search.ts -e ./extensions/shell-bg.ts -e ./extensions/edit.ts
+pi -e ./extensions/fs-search.ts -e ./extensions/shell-bg.ts -e ./extensions/edit.ts -e ./extensions/skill-write.ts
 ```
 
 Requires `rg` on `PATH` (or run Pi's built-in grep once so Pi downloads ripgrep into `~/.pi/agent/bin`).

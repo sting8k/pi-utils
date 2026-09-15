@@ -48,11 +48,28 @@ export interface EditSettings {
 	timeoutSec: number;
 }
 
+export interface SkillsSettings {
+	/**
+	 * System-prompt skills index (US-004): "smart" re-renders native's
+	 * <available_skills> block with the visibility pipeline; "native"
+	 * passes the block through byte-identical.
+	 */
+	index: "smart" | "native";
+	/** Smart mode: categories without recently-used skills collapse to names-only above this count. */
+	indexFullLimit: number;
+	/**
+	 * Iterations since last skill_write before the nudge line fires on a
+	 * tool result (once per interval, then reset); 0 disables.
+	 */
+	nudgeInterval: number;
+}
+
 export interface PiUtilsSettings {
 	fsSearch: FsSearchSettings;
 	shellBg: ShellBgSettings;
 	bashRouter: BashRouterSettings;
 	edit: EditSettings;
+	skills: SkillsSettings;
 	/** Tools skipped at registration time (US-002). Names must be in KNOWN_TOOLS. */
 	disabledTools: string[];
 }
@@ -65,6 +82,7 @@ export const KNOWN_TOOLS = [
 	"shell_status",
 	"shell_kill",
 	"edit",
+	"skill_write",
 ] as const;
 
 export const DEFAULT_SETTINGS: PiUtilsSettings = {
@@ -89,11 +107,20 @@ export const DEFAULT_SETTINGS: PiUtilsSettings = {
 		lang: "python",
 		timeoutSec: 10,
 	},
+	skills: {
+		index: "smart",
+		indexFullLimit: 50,
+		// Nudge ON by default (spec 499573a): the only active learn-trigger
+		// in v1. 0 = off.
+		nudgeInterval: 10,
+	},
 	// Owner preference (2026-09-15): standalone search tools ship OFF by
 	// default — the bash router (US-001) already runs rg/grep/glob-style
 	// commands through the same fs-search cores, so one surface suffices.
 	// Set [] to opt back into the dedicated grep/glob tools.
-	disabledTools: ["grep", "glob"],
+	// US-004: skill_write also ships OFF — the skills layer is opt-in;
+	// removing the entry enables tool + index transform + nudge together.
+	disabledTools: ["grep", "glob", "skill_write"],
 };
 
 export interface SettingsLoadResult {
@@ -374,6 +401,50 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 					);
 				} else {
 					settings.edit.timeoutSec = value;
+				}
+			}
+		}
+	}
+
+	// skills (US-004): a missing section or key stays silent — A1 precedent.
+	const skRaw = merged.skills;
+	if (skRaw !== undefined) {
+		if (!isRecord(skRaw)) {
+			warnings.push('"skills" is not an object — using defaults');
+		} else {
+			if ("index" in skRaw) {
+				const mode = skRaw.index;
+				if (mode === "smart" || mode === "native") {
+					settings.skills.index = mode;
+				} else {
+					warnings.push(
+						`"skills.index" invalid (${JSON.stringify(mode)}) — using default`,
+					);
+				}
+			}
+			if ("indexFullLimit" in skRaw) {
+				const value = positiveInt(skRaw.indexFullLimit);
+				if (value === undefined) {
+					warnings.push(
+						`"skills.indexFullLimit" invalid (${JSON.stringify(skRaw.indexFullLimit)}) — using default`,
+					);
+				} else {
+					settings.skills.indexFullLimit = value;
+				}
+			}
+			if ("nudgeInterval" in skRaw) {
+				const value = skRaw.nudgeInterval;
+				// 0 is a meaningful value (off) — non-negative int, not positiveInt.
+				if (
+					typeof value === "number" &&
+					Number.isInteger(value) &&
+					value >= 0
+				) {
+					settings.skills.nudgeInterval = value;
+				} else {
+					warnings.push(
+						`"skills.nudgeInterval" invalid (${JSON.stringify(value)}) — using default`,
+					);
 				}
 			}
 		}
