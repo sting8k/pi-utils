@@ -2,7 +2,7 @@
 
 ## Status
 
-planned
+implemented — E2E smoked 2026-09-15 (disabledTools: ["glob"] → reload → glob tool absent, grep/shell tools live; settings reverted after)
 
 ## Lane
 
@@ -100,12 +100,8 @@ Out of scope:
   hold. Owner reviewed and kept the commit. Standing rule going forward:
   peers commit locally and report; only the owner — or someone the owner
   names in so many words — pushes. Delegation never inherits push.
-- Current state: implemented — commit f7b4ab1 (settings + gates + tests +
-  README), CI green; main session re-verified locally 2026-09-15 (check
-  clean, 187/187). Remaining: owner E2E smoke.
-- Next action or owner: E2E smoke — set `"disabledTools": ["glob"]` in
-  pi-utils.json, `/reload`, confirm glob tool absent while grep stays —
-  then main session flips Status to `implemented`.
+- Current state: DONE — f7b4ab1 + owner E2E smoke passed 2026-09-15 (glob absent from the agent toolset with the key set; grep still served by fs-search; settings reverted after the smoke). Note: f7b4ab1 landed via the push-protocol incident recorded above.
+- Next action or owner: none — acceptance complete.
 
 ## Acceptance / Proof
 
