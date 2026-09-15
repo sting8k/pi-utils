@@ -218,6 +218,11 @@ the tool but want native's flat index → `skills.index=native`). Rationale: pro
 disabledTools can't literally reach them — the handler honoring the
 matcher is a design choice, not a gap.
 
+Scaffold default: `pi-utils.json` ships with `"skill_write"` inside
+`disabledTools` — the skills layer is **opt-in**: users enable it by
+removing that line (same pattern as the US-002 grep/glob scaffold
+defaults).
+
 ## Context Map
 
 - new: `extensions/skill-write.ts` — tool registration (follow
@@ -253,6 +258,8 @@ matcher is a design choice, not a gap.
 - `skills.index=native` → prompt block byte-identical to native
 - `disabledTools: ["skill*"]` → tool hidden AND prompt untouched
   (native index as-is, no rules block) AND no nudge lines
+- fresh scaffold `pi-utils.json` already contains `"skill_write"` in
+  `disabledTools` — layer inert until the user removes the line
 - smart mode: skill with `platforms:[windows]` on macOS absent;
   `requires:[bogus-bin]` absent; >limit → names-only demotion +
   pointer; malformed frontmatter → `⚠` flag; unparseable native
