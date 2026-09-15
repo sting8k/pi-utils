@@ -151,8 +151,11 @@ why — not a session log. ```
 ### Nudge (optional)
 
 `skills.nudge_interval` (default 0 = off). Count tool iterations
-since last `skill_write`; at threshold append to next tool result:
-`"[skills] N iters since last skill write — worth saving anything?"`
+since last `skill_write`; at threshold append once to the next tool
+result — `"[skills] N iters since last skill write — worth saving
+anything?"` — then reset the counter to 0 and count again. Counter
+also resets on any `skill_write` call. Fires once per interval, never
+per-result spam.
 
 ### Smart index transform (`before_agent_start`)
 
