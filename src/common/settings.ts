@@ -315,11 +315,28 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 			const seen = new Set<string>();
 			const dropped: string[] = [];
 			for (const entry of dtRaw) {
-				if (
-					typeof entry !== "string" ||
-					!(KNOWN_TOOLS as readonly string[]).includes(entry)
-				) {
+				if (typeof entry !== "string") {
 					dropped.push(JSON.stringify(entry)); // typo protection: name the bad entry
+					continue;
+				}
+				// Trailing-* prefix wildcard (e.g. "self-*"): expanded to the
+				// concrete KNOWN_TOOLS names it matches AT LOAD TIME — consumers
+				// keep exact-match gates, and patterns silently pick up tools
+				// added in later versions. Only trailing * is supported; other
+				// * placements are malformed and dropped.
+				if (entry.endsWith("*")) {
+					const prefix = entry.slice(0, -1);
+					if (prefix.includes("*")) {
+						dropped.push(JSON.stringify(entry));
+						continue;
+					}
+					for (const name of KNOWN_TOOLS) {
+						if (name.startsWith(prefix)) seen.add(name);
+					}
+					continue;
+				}
+				if (!(KNOWN_TOOLS as readonly string[]).includes(entry)) {
+					dropped.push(JSON.stringify(entry));
 					continue;
 				}
 				seen.add(entry); // duplicates dedupe silently

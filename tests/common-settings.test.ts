@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	DEFAULT_SETTINGS,
+	KNOWN_TOOLS,
 	loadSettings,
 	settingsFilePath,
 } from "../src/common/settings.ts";
@@ -186,6 +187,65 @@ describe("loadSettings — disabledTools (US-002)", () => {
 		expect(result.settings.disabledTools).toEqual(["glob"]);
 		expect(result.warnings.some((w) => w.includes('"grpe"'))).toBe(true);
 		expect(result.warnings.some((w) => w.includes("42"))).toBe(true);
+	});
+
+	test("trailing-* wildcard expands to matching KNOWN_TOOLS", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: ["shell*"] }),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.disabledTools).toEqual([
+			"shell_status",
+			"shell_kill",
+		]);
+		expect(result.warnings).toEqual([]);
+	});
+
+	test("wildcard matching nothing stays silent (future-proofing)", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: ["self-*"] }),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.disabledTools).toEqual([]);
+		expect(result.warnings).toEqual([]);
+	});
+
+	test("wildcard mixes with exact entries; duplicates dedupe", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({
+				fsSearch: {},
+				shellBg: {},
+				disabledTools: ["shell*", "shell_status", "edit"],
+			}),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.disabledTools).toEqual([
+			"shell_status",
+			"shell_kill",
+			"edit",
+		]);
+	});
+
+	test("bare * disables everything", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: ["*"] }),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.disabledTools).toEqual([...KNOWN_TOOLS]);
+	});
+
+	test("non-trailing * is malformed: dropped and named in the warning", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: ["se*xt"] }),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.disabledTools).toEqual([]);
+		expect(result.warnings.some((w) => w.includes("se*xt"))).toBe(true);
 	});
 });
 

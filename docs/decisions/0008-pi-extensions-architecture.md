@@ -94,3 +94,9 @@ defaults still apply). Contract:
   for later surfacing.
 - Parse errors still never touch the file.
 
+`disabledTools` wildcard (2026-09-15): entries may end with `*` (prefix
+wildcard, e.g. `"self-*"`). Patterns expand to concrete `KNOWN_TOOLS`
+names at load time, so consumer gates stay exact-match and patterns pick
+up tools added in later versions. Non-trailing `*` placements are
+malformed: dropped with a warning.
+

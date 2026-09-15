@@ -174,7 +174,12 @@ Valid names are `grep`, `glob`, `bash`, `shell_status`, `shell_kill`, `edit`. Th
 is optional; **fresh installs scaffold with `["grep", "glob"]` — standalone
 search tools ship OFF by default because the bash router already runs
 rg/grep/glob-style commands through the same engines; set `[]` to turn them
-back on.** Unknown names produce a warning and are dropped, duplicates dedupe.
+back on.** Unknown names produce a warning and are dropped, duplicates dedupe. Entries
+may use a trailing `*` prefix wildcard: `"shell*"` disables `shell_status`
+and `shell_kill`, and `"self-*"` stays dormant until `self-*` tools are
+added in a later version — patterns expand at load time, so they pick up
+future tools automatically. Only trailing wildcards are supported; other
+`*` placements warn and are dropped.
 
 Layering — two levels of toggles: to disable a whole module, use pi's own
 extension toggle (`package.json → "pi"."extensions"`); to disable a single
