@@ -35,6 +35,7 @@ import {
 	formatDiffs,
 	unifiedPatch,
 } from "../src/edit/diff.ts";
+import { withPathLocks } from "../src/edit/mutation-queue.ts";
 import {
 	type FileChange,
 	runEditScript,
@@ -114,14 +115,18 @@ export default function editExtension(pi: ExtensionAPI) {
 					const resolved = args.paths.map((p) =>
 						isAbsolute(p) ? p : join(ctx.cwd, p),
 					);
-					const outcome = await runEditScript({
-						code: args.code,
-						paths: resolved,
-						lang: args.lang ?? settings.edit.lang,
-						timeoutSec: args.timeout ?? settings.edit.timeoutSec,
-						cwd: ctx.cwd,
-						signal,
-					});
+					// Lock the whole window (snapshot → script → diff → rollback)
+					// per path, so concurrent calls never misattribute writes.
+					const outcome = await withPathLocks(resolved, async () =>
+						runEditScript({
+							code: args.code,
+							paths: resolved,
+							lang: args.lang ?? settings.edit.lang,
+							timeoutSec: args.timeout ?? settings.edit.timeoutSec,
+							cwd: ctx.cwd,
+							signal,
+						}),
+					);
 					const display = new Map(
 						resolved.map((abs, index) => [abs, args.paths[index]] as const),
 					);
