@@ -125,6 +125,30 @@ describe("smart index transform (US-004)", () => {
 		expect(spliced).toContain("desc of alpha");
 	});
 
+	test("scalar platforms/requires (YAML shorthand) normalize and filter", () => {
+		const entries = [
+			skill("win-scalar", {
+				name: "win-scalar",
+				description: "d",
+				platforms: "windows", // scalar, not array
+			}),
+			skill("missing-bin-scalar", {
+				name: "missing-bin-scalar",
+				description: "d",
+				requires: "bogus-bin-xyz", // scalar, not array
+			}),
+			skill("host-scalar", {
+				name: "host-scalar",
+				description: "d",
+				platforms: "macos", // scalar on host — visible
+			}),
+		];
+		const { result } = transform(entries, { requires: () => false });
+		if (!result) return expect(result).not.toBeNull();
+		expect(result.hidden).toEqual(["win-scalar", "missing-bin-scalar"]);
+		expect(result.block).toContain('"host-scalar"');
+	});
+
 	test("platforms: windows-only skill hidden on darwin", () => {
 		const entries = [
 			skill("win-only", {

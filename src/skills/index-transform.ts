@@ -275,6 +275,9 @@ function defaultRead(path: string): string | null {
 }
 
 function stringArray(value: unknown): string[] {
+	// YAML scalar shorthand ("platforms: linux") normalizes to [value] —
+	// silently dropping it would no-op the filter (field-reported bug).
+	if (typeof value === "string") return value ? [value] : [];
 	return Array.isArray(value)
 		? value.filter((v): v is string => typeof v === "string")
 		: [];
