@@ -2,9 +2,11 @@
 
 ## Status
 
-planned — spec revised 2026-09-15 after Peanut's investigation:
-pi 0.85.1 ships a **native skills system**, so this spec covers only
-the write/improve half of the loop. Ready for Peanut review → Mark.
+implemented — 30b918d, live-smoked 2026-09-15 (fresh session:
+tool advertised, transform + rules block rendered; write path:
+create/guard/patch-diff/delete round-trip; nudge fire-once x3
+independent sessions). Emit-format delta (group-by-root, collision
+location) approved post-smoke — landing as follow-up.
 
 ## Lane
 
@@ -174,6 +176,13 @@ Locate `<available_skills>…</available_skills>` in
 re-emit in our own format and splice back. Parse failure or missing
 block → return unchanged (worst case = native).
 
+Emit format: entries **grouped by root dir** — one `# <abs root>`
+header per group, entries carry only `name` + inline `description`.
+Per-entry `location=` is emitted ONLY when the same `name` exists
+under two different roots (native collision case — the attr then
+disambiguates). Repeating a 40-char root prefix on every entry is
+pure prompt waste.
+
 Pipeline per entry:
 
 1. `platforms` excludes host OS → hidden
@@ -256,6 +265,8 @@ defaults).
   message; failed multi-step → rolled back
 - nudge on by default (interval 10); interval=3 fires after 3 iters; 0 = silent
 - `skills.index=native` → prompt block byte-identical to native
+- smart mode: root prefix appears once per group header; a name
+  existing under two roots keeps `location=` on those entries only
 - `disabledTools: ["skill*"]` → tool hidden AND prompt untouched
   (native index as-is, no rules block) AND no nudge lines
 - fresh scaffold `pi-utils.json` already contains `"skill_write"` in
