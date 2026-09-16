@@ -185,7 +185,9 @@ pure prompt waste.
 
 Pipeline per entry:
 
-1. `platforms` excludes host OS → hidden
+1. `platforms` excludes host OS → hidden (scalar YAML shorthand
+   `platforms: linux` normalizes to `[linux]` — never a silent
+   no-op; same for `requires`)
 2. `requires` binary missing from PATH (`which`, cached/session) →
    hidden
 3. `disable-model-invocation` → hidden (slash-only contract — same
