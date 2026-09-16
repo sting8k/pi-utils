@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, normalize } from "node:path";
 import { parseSkillFile } from "../src/skills/frontmatter.ts";
 import {
 	categoryOf,
@@ -71,6 +71,7 @@ function transform(
 			opts.recentlyUsed ?? [],
 			{
 				skillsRoot: root,
+				knownRoots: [root],
 				hostPlatform: opts.hostPlatform ?? "darwin",
 				requiresCheck: opts.requires ?? (() => true),
 				metaCache,
@@ -80,7 +81,7 @@ function transform(
 }
 
 describe("smart index transform (US-004)", () => {
-	test("keeps the native tag name and re-emits one-line entries", () => {
+	test("keeps the native tag name; groups by root; location only on collision", () => {
 		const entries = [
 			skill("alpha", { name: "alpha", description: "desc of alpha" }),
 		];
@@ -88,7 +89,35 @@ describe("smart index transform (US-004)", () => {
 		expect(result).not.toBeNull();
 		if (!result) return;
 		expect(result.block.startsWith("<available_skills>")).toBe(true);
-		expect(result.block).toMatch(/<skill name="alpha" location=/);
+		// Group header carries the abs root ONCE; the entry is name+desc only —
+		// no location attr without a collision.
+		expect(result.block).toContain(`# ${root}`);
+		expect(result.block).toContain('<skill name="alpha">desc of alpha</skill>');
+		expect(result.block).not.toContain("location=");
+
+		// Collision: same name under a different known root → both entries
+		// carry location=.
+		const otherRoot = normalize(join(root, "..", "other-skills-root"));
+		mkdirSync(join(otherRoot, "alpha"), { recursive: true });
+		const alphaLocation = join(otherRoot, "alpha", "SKILL.md");
+		writeFileSync(
+			alphaLocation,
+			"---\nname: alpha\ndescription: project twin\n---\n\nbody\n",
+		);
+		const collided = transform([
+			...entries,
+			["alpha", "project twin", alphaLocation],
+		]);
+		expect(collided.result).not.toBeNull();
+		if (!collided.result) return;
+		expect(collided.result.block).toContain(`# ${root}`);
+		expect(collided.result.block).toContain(`# ${otherRoot}`);
+		const locationLines = collided.result.block
+			.split("\n")
+			.filter((line) => line.includes("location="));
+		expect(locationLines).toHaveLength(2);
+		expect(collided.result.block).toContain(`location="${alphaLocation}"`);
+
 		// Spliced back into the prompt: native header/epilogue survive.
 		const spliced =
 			prompt.slice(0, result.start) + result.block + prompt.slice(result.end);
@@ -196,6 +225,7 @@ describe("smart index transform (US-004)", () => {
 		expect(
 			transformSkillsIndex("no block at all", 50, [], {
 				skillsRoot: root,
+				knownRoots: [root],
 				hostPlatform: "darwin",
 				requiresCheck: () => true,
 				metaCache,
@@ -206,6 +236,7 @@ describe("smart index transform (US-004)", () => {
 		expect(
 			transformSkillsIndex(broken, 50, [], {
 				skillsRoot: root,
+				knownRoots: [root],
 				hostPlatform: "darwin",
 				requiresCheck: () => true,
 				metaCache,

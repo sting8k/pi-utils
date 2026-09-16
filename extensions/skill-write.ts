@@ -48,6 +48,7 @@ import {
 	type SeenMap,
 } from "../src/skills/guard.ts";
 import {
+	rootOf,
 	type SkillMeta,
 	transformSkillsIndex,
 } from "../src/skills/index-transform.ts";
@@ -131,7 +132,7 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 	});
 
 	// ONE handler: smart-index transform + rules-block append, single return.
-	pi.on("before_agent_start", (event) => {
+	pi.on("before_agent_start", (event, ctx) => {
 		if (!layerEnabled) return undefined; // kill-switch: passthrough native
 		let systemPrompt = event.systemPrompt;
 		if (settings.skills.index !== "native") {
@@ -141,6 +142,7 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 				seen.paths(),
 				{
 					skillsRoot,
+					knownRoots: scanRoots(skillsRoot, ctx.cwd),
 					hostPlatform: process.platform,
 					requiresCheck,
 					metaCache,
@@ -213,13 +215,16 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 				),
 			}),
 			...droidToolRender(droid, skillWriteRenderers),
-			async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-				return runOp(params);
+			async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+				return runOp(params, ctx.cwd);
 			},
 		});
 	}
 
-	function runOp(params: Record<string, unknown>): {
+	function runOp(
+		params: Record<string, unknown>,
+		cwd: string,
+	): {
 		content: Array<{ type: "text"; text: string }>;
 		details: Record<string, unknown>;
 		isError?: boolean;
@@ -253,7 +258,7 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: buildCreateText(result.path, content),
+						text: buildCreateText(result.path, content, skillsRoot, cwd),
 					},
 				],
 				details: { action, name, path: result.path, warnings: result.warnings },
@@ -325,8 +330,18 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 	registerTool(null);
 }
 
-/** create response: path + advisory warnings + rendered index preview + tip. */
-function buildCreateText(path: string, content: string): string {
+/**
+ * create response: path + advisory warnings + rendered index preview + tip.
+ * The preview renders in the CURRENT emit format (spec e9150d8): group
+ * header `# <root>` + name/description line, `location=` only on a
+ * same-name collision across roots — the preview must never lie.
+ */
+function buildCreateText(
+	path: string,
+	content: string,
+	skillsRoot: string,
+	cwd: string,
+): string {
 	const lines = [`skill created: ${path}`];
 	const parsed = parseSkillFile(content);
 	if (parsed.ok) {
@@ -338,9 +353,19 @@ function buildCreateText(path: string, content: string): string {
 			lines.push(
 				`warning: description is ${description.length} chars — the native index renders it in full (prompt bloat). Consider ≤${DESCRIPTION_SOFT_LIMIT}.`,
 			);
+			const name =
+				typeof parsed.frontmatter.name === "string"
+					? parsed.frontmatter.name
+					: "";
+			const root = rootOf(path, scanRoots(skillsRoot, cwd));
+			const collision = scanRoots(skillsRoot, cwd).some(
+				(root2) => root2 !== root && existsSync(join(root2, name, SKILL_MD)),
+			);
+			const locationAttr = collision ? ` location="${path}"` : "";
 			lines.push("Rendered index line (index_preview):");
+			lines.push(`# ${root}`);
 			lines.push(
-				`  <skill>\n    <name>${parsed.frontmatter.name ?? ""}</name>\n    <description>${description}</description>\n    <location>${path}</location>\n  </skill>`,
+				`  <skill name="${name}"${locationAttr}>${description}</skill>`,
 			);
 		}
 		const recommended = ["platforms", "requires", "tags", "related"];
@@ -352,6 +377,15 @@ function buildCreateText(path: string, content: string): string {
 		}
 	}
 	return lines.join("\n");
+}
+
+/**
+ * Candidate skills scan roots (user + project) — same list the transform
+ * groups entries by. Extension-contributed dirs fall back to rootOf's
+ * nearest-"skills"-ancestor heuristic.
+ */
+function scanRoots(skillsRoot: string, cwd: string): string[] {
+	return [...new Set([skillsRoot, join(cwd, ".pi", "skills")])];
 }
 
 /** Keep the patch diff surface small (same rationale as edit.ts). */

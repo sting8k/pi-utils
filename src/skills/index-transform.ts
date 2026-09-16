@@ -19,7 +19,7 @@
  * Pure module: fs access injectable for tests.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, relative } from "node:path";
+import { basename, dirname, relative } from "node:path";
 import { parseFrontmatterLenient } from "./frontmatter.ts";
 
 export interface SkillIndexEntry {
@@ -38,6 +38,8 @@ export interface SkillMeta {
 
 export interface IndexTransformDeps {
 	skillsRoot: string;
+	/** All candidate scan roots (user + project + contributed) for grouping. */
+	knownRoots: string[];
 	/** Host platform (process.platform at the call site). */
 	hostPlatform: string;
 	/** Binary-on-PATH check (session-cached by the caller). */
@@ -147,9 +149,8 @@ export function transformSkillsIndex(
 		}
 	}
 
-	const lines: string[] = ["<available_skills>"];
 	const flagged: string[] = [];
-	const shownFull: Array<{ entry: SkillIndexEntry }> = [];
+	const shownFull: Array<{ entry: SkillIndexEntry; suffix: string }> = [];
 	for (const { entry, meta } of visible) {
 		if (
 			demotedCategories.includes(categoryOf(entry.location, deps.skillsRoot))
@@ -170,11 +171,40 @@ export function transformSkillsIndex(
 			flags.push(`⚠ possible overlap ${others.join("/")}≈${entry.name}`);
 			flagged.push(entry.name);
 		}
-		const suffix = flags.length > 0 ? ` ${flags.join(" ")}` : "";
+		shownFull.push({
+			entry,
+			suffix: flags.length > 0 ? ` ${flags.join(" ")}` : "",
+		});
+	}
+
+	// Emit (spec e9150d8): entries grouped by root dir — one `# <abs root>`
+	// header per group, entries carry only name + inline description.
+	// `location=` appears ONLY when the same name exists under two different
+	// roots (native collision case — the attr then disambiguates). Repeating
+	// a 40-char root prefix on every entry is pure prompt waste.
+	const rootsByName = new Map<string, Set<string>>();
+	for (const { entry } of shownFull) {
+		const root = rootOf(entry.location, deps.knownRoots);
+		const roots = rootsByName.get(entry.name);
+		if (roots) roots.add(root);
+		else rootsByName.set(entry.name, new Set([root]));
+	}
+
+	const lines: string[] = ["<available_skills>"];
+	let currentRoot: string | null = null;
+	for (const { entry, suffix } of shownFull) {
+		const root = rootOf(entry.location, deps.knownRoots);
+		if (root !== currentRoot) {
+			lines.push(`# ${escapeXml(root)}`);
+			currentRoot = root;
+		}
+		const collision = (rootsByName.get(entry.name)?.size ?? 0) > 1;
+		const locationAttr = collision
+			? ` location="${escapeXml(entry.location)}"`
+			: "";
 		lines.push(
-			`  <skill name="${escapeXml(entry.name)}" location="${escapeXml(entry.location)}">${escapeXml(entry.description)}${suffix}</skill>`,
+			`  <skill name="${escapeXml(entry.name)}"${locationAttr}>${escapeXml(entry.description)}${suffix}</skill>`,
 		);
-		shownFull.push({ entry });
 	}
 
 	// Demoted categories: names-only, one line per category.
@@ -258,6 +288,24 @@ function hostPlatformNames(platform: string): string[] {
 			return ["win32", "windows", "win"];
 		default:
 			return [platform];
+	}
+}
+
+/**
+ * Root dir of a skill (for group headers): a known scan root containing the
+ * location, else the nearest ancestor named "skills", else the skill dir's
+ * parent (best effort for extension-contributed dirs).
+ */
+export function rootOf(location: string, knownRoots: string[]): string {
+	for (const root of knownRoots) {
+		if (location === root || location.startsWith(`${root}/`)) return root;
+	}
+	let dir = dirname(dirname(location));
+	for (;;) {
+		if (basename(dir) === "skills") return dir;
+		const parent = dirname(dir);
+		if (parent === dir) return dirname(dirname(location));
+		dir = parent;
 	}
 }
 

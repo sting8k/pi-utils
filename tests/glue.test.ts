@@ -709,4 +709,64 @@ describe("skill_write glue (US-004)", () => {
 		expect(deleted.isError).toBeUndefined();
 		expect(deleted.content[0]?.text).toContain("skill deleted");
 	});
+
+	test("index_preview renders the current emit format (spec e9150d8)", async () => {
+		enableSkillWrite();
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/skill-write.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const skillWrite = captured.tools.find((t) => t.name === "skill_write");
+		if (!skillWrite) throw new Error("skill_write missing");
+		const longDesc = `Use when ${"z".repeat(70)}`;
+		const content = `---\nname: preview-skill\ndescription: ${longDesc}\n---\n\nbody\n`;
+
+		// No collision: group header + bare entry, no location attr.
+		const created = (await skillWrite.execute(
+			"pv1",
+			{ name: "preview-skill", action: "create", content },
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { content: Array<{ type: string; text: string }> };
+		const preview = created.content[0]?.text ?? "";
+		expect(preview).toContain(`# ${join(agentDir, "skills")}`);
+		expect(preview).toContain(
+			`<skill name="preview-skill">${longDesc}</skill>`,
+		);
+		expect(preview).not.toContain("location=");
+
+		// Same-root dup → error naming patch (unchanged behavior).
+		const dup = (await skillWrite.execute(
+			"pv2",
+			{ name: "preview-skill", action: "create", content },
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { isError?: boolean };
+		expect(dup.isError).toBe(true);
+
+		// Collision: same name already under the project root → the preview
+		// line carries location= (two roots hold one name).
+		mkdirSync(join(root, ".pi", "skills", "twin-skill"), { recursive: true });
+		writeFileSync(
+			join(root, ".pi", "skills", "twin-skill", "SKILL.md"),
+			content,
+		);
+		const withTwin = (await skillWrite.execute(
+			"pv3",
+			{
+				name: "twin-skill",
+				action: "create",
+				content: `---\nname: twin-skill\ndescription: ${longDesc}\n---\n\nbody\n`,
+			},
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+		expect(withTwin.isError).toBeUndefined();
+		expect(withTwin.content[0]?.text).toContain(
+			`location="${join(agentDir, "skills", "twin-skill", "SKILL.md")}"`,
+		);
+	});
 });
