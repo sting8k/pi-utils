@@ -1,6 +1,6 @@
 {
 	"name": "@sting8k/pi-utils",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"description": "Utility extensions for the Pi coding agent: deep fs-search (grep/glob), background shell (shell-bg), script-mode edit, and the skills write layer (skill_write)",
 	"type": "module",
 	"license": "MIT",
