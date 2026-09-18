@@ -169,7 +169,9 @@ describe("smart index transform (US-004)", () => {
 		expect(result.hidden).toEqual(["win-only"]);
 		expect(result.block).toContain('"mac-ok"');
 		expect(result.block).not.toContain('"win-only"');
-		expect(result.block).toMatch(/1 more — ls .+ or \/skill:<name>/);
+		expect(result.block).toMatch(
+			/\n\n# not shown in full\n {2}1 hidden by platforms\/requires\/dirs — ls .+ or \/skill:<name>\n<\/available_skills>$/,
+		);
 	});
 
 	test("requires: missing binary hides", () => {
@@ -217,7 +219,9 @@ describe("smart index transform (US-004)", () => {
 		expect(result.block).toContain('"noscoped"'); // absent key → shown
 		expect(result.block).not.toContain('"elsewhere"');
 		expect(result.block).not.toContain('"substr"'); // no substring match
-		expect(result.block).toMatch(/2 more — ls .+ or \/skill:<name>/);
+		expect(result.block).toMatch(
+			/2 hidden by platforms\/requires\/dirs — ls .+/,
+		);
 	});
 
 	test("disable-model-invocation hidden (belt-and-suspenders)", () => {
@@ -250,8 +254,8 @@ describe("smart index transform (US-004)", () => {
 		});
 		if (!result) return expect(result).not.toBeNull();
 		expect(result.block).toMatch(
-			/<collapsed category="cat1">c1-a, c1-b<\/collapsed>/,
-		);
+			/\n\n# not shown in full\n {2}<collapsed category="cat1">c1-a, c1-b<\/collapsed>\n<\/available_skills>$/,
+		); // own section; no "hidden" pointer when nothing was hidden
 		expect(result.block).toContain('"c2-a"'); // full entry kept
 		expect(result.demoted).toEqual(["c1-a", "c1-b"]);
 	});

@@ -14,7 +14,8 @@
  *
  * Pipeline: platforms excludes host → requires missing from PATH →
  * dirs declares no segment of cwd → disable-model-invocation →
- * over-limit demotion (names-only) → quality flags → tail pointer.
+ * over-limit demotion (names-only) → quality flags → tail section
+ * (collapsed lines + hidden-count pointer).
  *
  * Pure module: fs access injectable for tests.
  */
@@ -216,26 +217,30 @@ export function transformSkillsIndex(
 		);
 	}
 
-	// Demoted categories: names-only, one line per category.
+	// Tail section: everything NOT shown in full lives under its own header,
+	// separated by a blank line — so neither the collapsed lines nor the
+	// hidden-count pointer read as entries of the last root group (a reader
+	// mis-attributed the pointer's path to the group above it).
 	const demoted: string[] = [];
-	for (const category of demotedCategories) {
-		const names = visible
-			.filter(
-				({ entry }) => categoryOf(entry.location, deps.skillsRoot) === category,
-			)
-			.map(({ entry }) => entry.name);
-		demoted.push(...names);
-		lines.push(
-			`  <collapsed category="${escapeXml(category)}">${escapeXml(names.join(", "))}</collapsed>`,
-		);
-	}
-
-	// Step 6: tail pointer when anything was hidden or demoted.
-	const notFullyShown = hidden.length + demoted.length;
-	if (notFullyShown > 0) {
-		lines.push(
-			`  ${notFullyShown} more — ls ${deps.skillsRoot} or /skill:<name>`,
-		);
+	if (hidden.length + demotedCategories.length > 0) {
+		lines.push("", "# not shown in full");
+		for (const category of demotedCategories) {
+			const names = visible
+				.filter(
+					({ entry }) =>
+						categoryOf(entry.location, deps.skillsRoot) === category,
+				)
+				.map(({ entry }) => entry.name);
+			demoted.push(...names);
+			lines.push(
+				`  <collapsed category="${escapeXml(category)}">${escapeXml(names.join(", "))}</collapsed>`,
+			);
+		}
+		if (hidden.length > 0) {
+			lines.push(
+				`  ${hidden.length} hidden by platforms/requires/dirs — ls ${deps.skillsRoot} or /skill:<name>`,
+			);
+		}
 	}
 	lines.push("</available_skills>");
 

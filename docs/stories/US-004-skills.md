@@ -214,8 +214,13 @@ Pipeline per entry:
    no persistence in v1
 6. quality flags: `⚠ missing description`, `⚠ possible overlap a≈b`
    (same category + near-identical desc prefix)
-7. tail pointer when anything hidden/demoted:
-   `N more — ls ~/.pi/agent/skills/ or /skill:<name>`
+7. tail section when anything hidden/demoted — blank line, then a
+   `# not shown in full` header (same style as the root headers), the
+   `<collapsed category=…>` lines, and — only if something was hidden —
+   `N hidden by platforms/requires/dirs — ls <skillsRoot> or
+   /skill:<name>`. Own section so neither line reads as an entry of
+   the last root group (a fresh reader mis-attributed the pointer's
+   path to the `~/.agents/skills` header above it, 2026-09-18).
 
 Data sources are split on purpose: **which skills exist** comes from
 native's block (name + path per entry — inherits user dir + project
