@@ -75,10 +75,11 @@ function fakePi(): { api: ExtensionAPI; captured: Captured } {
 	return { api: api as unknown as ExtensionAPI, captured };
 }
 
-function fakeCtx(cwd: string, hasUI = false): ExtensionContext {
+function fakeCtx(cwd: string, hasUI = false, idle = true): ExtensionContext {
 	return {
 		cwd,
 		hasUI,
+		isIdle: () => idle,
 		ui: { notify: () => {}, setWidget: () => {} },
 		sessionManager: {
 			getSessionId: () => process.env.PI_SESSION_ID ?? "glue-test",
@@ -310,6 +311,42 @@ describe("shell-bg glue", () => {
 			deliverAs: "followUp",
 			triggerTurn: true,
 		});
+	});
+
+	test("jobs finishing mid-run wait and ship together at agent_settled", async () => {
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/shell-bg.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const bash = captured.tools.find((t) => t.name === "bash");
+		if (!bash) throw new Error("bash tool missing");
+		const busy = fakeCtx(root, false, false);
+		for (const tag of ["batch-a", "batch-b"]) {
+			await bash.execute(
+				`t7-${tag}`,
+				{ command: `echo ${tag}`, background: true },
+				undefined,
+				undefined,
+				busy,
+			);
+		}
+		await new Promise((resolve) => setTimeout(resolve, 900));
+		const isDelivery = (m: Captured["messages"][number]) =>
+			m.message.customType === "pi-utils-shell-bg-result";
+		expect(captured.messages.filter(isDelivery).length).toBe(0);
+		for (const handler of captured.handlers.get("agent_settled") ?? []) {
+			await handler({ type: "agent_settled" }, busy);
+		}
+		const deliveries = captured.messages.filter(isDelivery);
+		expect(deliveries.length).toBe(1);
+		const content = String(deliveries[0]?.message.content);
+		expect(content).toContain("batch-a");
+		expect(content).toContain("batch-b");
+		// Settling again with nothing new delivers nothing.
+		for (const handler of captured.handlers.get("agent_settled") ?? []) {
+			await handler({ type: "agent_settled" }, busy);
+		}
+		expect(captured.messages.filter(isDelivery).length).toBe(1);
 	});
 
 	test("pure search command routes to the fs-search core (US-001)", async () => {

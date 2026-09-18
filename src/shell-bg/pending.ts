@@ -80,14 +80,34 @@ export function backgroundedResult(
 	};
 }
 
-/** How a finished background job introduces itself when it arrives unasked. */
-export function deliveryMessage(id: string, body: string): string {
+export interface DeliveredJob {
+	id: string;
+	body: string;
+}
+
+/**
+ * How finished background jobs introduce themselves when they arrive unasked.
+ * Several jobs that finished during one agent run travel in a single message:
+ * pi's follow-up queue is drained one message per turn by default, so one
+ * message per job would cost a whole turn each.
+ */
+export function deliveryMessage(jobs: DeliveredJob[]): string {
+	const blocks = jobs.map((job) =>
+		[
+			`<shell_bg_result id="${job.id}">`,
+			job.body.trim(),
+			`</shell_bg_result>`,
+		].join("\n"),
+	);
+	const ids = jobs.map((job) => job.id).join(", ");
+	const intro =
+		jobs.length === 1
+			? `This is ${ids}, a command you sent to the background; it has just finished and this is its result.`
+			: `These are ${ids}, commands you sent to the background; they have finished and these are their results.`;
 	return [
-		`<shell_bg_result id="${id}">`,
-		body.trim(),
-		`</shell_bg_result>`,
+		...blocks,
 		"",
-		`This is ${id}, a command you sent to the background; it has just finished and this is its result.`,
+		intro,
 		"Fold it into what you are doing. If you had already moved on, say what it changes — or that it changes nothing.",
 	].join("\n");
 }

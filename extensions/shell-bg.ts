@@ -80,7 +80,7 @@ import {
 	sessionKeyFor,
 } from "../src/shell-bg/registry.ts";
 import { type Spawned, spawnToFile } from "../src/shell-bg/spawn.ts";
-import type { Job } from "../src/shell-bg/types.ts";
+import { isFinished, type Job } from "../src/shell-bg/types.ts";
 
 type ToolResult = {
 	content: Array<{ type: "text"; text: string }>;
@@ -253,32 +253,63 @@ export default function shellBackground(pi: ExtensionAPI) {
 		}
 	});
 
-	/** Deliver a finished background job into the conversation, once. */
-	function scheduleDelivery(job: Job, exit: Promise<unknown>): void {
+	/**
+	 * Push every finished, not-yet-delivered job into the conversation as one
+	 * message. Runs when a job exits while the agent is idle, and after each
+	 * agent run settles — jobs that finish mid-run wait and ship together.
+	 */
+	async function deliverFinished(): Promise<void> {
+		if (!registry) return;
+		const jobs = registry
+			.all()
+			.filter((job) => isFinished(job) && !job.delivered);
+		if (jobs.length === 0) return;
+		for (const job of jobs) {
+			job.delivered = true;
+			registry.persist(job);
+		}
+		renderWidget();
+		const results = await Promise.all(
+			jobs.map(async (job) => ({
+				id: job.id,
+				body: await formatResult(job, settings.shellBg.tailBytes),
+			})),
+		);
+		pi.sendMessage(
+			{
+				customType: DELIVERY_TYPE,
+				content: deliveryMessage(results),
+				display: true,
+				details: {
+					jobs: jobs.map((job) => ({
+						id: job.id,
+						status: job.status,
+						exitCode: job.exitCode,
+					})),
+				},
+			},
+			{ deliverAs: "followUp", triggerTurn: true },
+		);
+	}
+
+	/** Deliver a background job when it exits — now if the agent is idle, else
+	 * with its siblings at agent_settled (pi drains follow-ups one per turn by
+	 * default, so a message per job would cost a turn each). */
+	function scheduleDelivery(exit: Promise<unknown>): void {
 		exit
-			.then(async () => {
-				if (job.delivered) return;
-				job.delivered = true;
-				registry?.persist(job);
-				renderWidget();
-				pi.sendMessage(
-					{
-						customType: DELIVERY_TYPE,
-						content: deliveryMessage(
-							job.id,
-							await formatResult(job, settings.shellBg.tailBytes),
-						),
-						display: true,
-						details: { id: job.id, status: job.status, exitCode: job.exitCode },
-					},
-					{ deliverAs: "followUp", triggerTurn: true },
-				);
+			.then(() => {
+				if (lastUiCtx?.isIdle?.() === false) return;
+				return deliverFinished();
 			})
 			.catch(() => {
 				// A /reload can make captured handles throw; delivery is a convenience,
 				// shell_status still collects the result.
 			});
 	}
+
+	pi.on("agent_settled", async () => {
+		await deliverFinished();
+	});
 
 	/**
 	 * Execute a routed search on the fs-search core (US-001): one-line note
@@ -410,7 +441,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 		});
 
 		if (params.background === true) {
-			scheduleDelivery(job, settle);
+			scheduleDelivery(settle);
 			const r = backgroundedResult({
 				id: job.id,
 				command,
@@ -460,7 +491,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 				job.auto = true;
 				registry.persist(job);
 				renderWidget(ctx);
-				scheduleDelivery(job, settle);
+				scheduleDelivery(settle);
 				const r = backgroundedResult({
 					id: job.id,
 					command,
@@ -586,6 +617,11 @@ export default function shellBackground(pi: ExtensionAPI) {
 					};
 				}
 				const text = await formatResult(job, settings.shellBg.tailBytes);
+				// Collected by hand: the conversation has it, no delivery needed.
+				if (!job.delivered) {
+					job.delivered = true;
+					registry.persist(job);
+				}
 				return {
 					content: [{ type: "text", text }],
 					details: { id: job.id, status: job.status, exitCode: job.exitCode },

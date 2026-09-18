@@ -159,10 +159,21 @@ describe("pending messages", () => {
 	});
 
 	test("delivery message wraps the body with the id", () => {
-		const m = deliveryMessage("bg-1", "exit 0\nok");
+		const m = deliveryMessage([{ id: "bg-1", body: "exit 0\nok" }]);
 		expect(m).toContain('<shell_bg_result id="bg-1">');
-		expect(m).toContain("just finished");
+		expect(m).toContain("This is bg-1");
 		expect(DELIVERY_TYPE).toBe("pi-utils-shell-bg-result");
+	});
+
+	test("delivery message batches several finished jobs into one block set", () => {
+		const m = deliveryMessage([
+			{ id: "bg-1", body: "exit 0\nok" },
+			{ id: "bg-2", body: "exit 1\nboom" },
+		]);
+		expect(m).toContain('<shell_bg_result id="bg-1">');
+		expect(m).toContain('<shell_bg_result id="bg-2">');
+		expect(m.indexOf("bg-1")).toBeLessThan(m.indexOf("bg-2"));
+		expect(m).toContain("These are bg-1, bg-2");
 	});
 
 	test("formatList and header render jobs", () => {
