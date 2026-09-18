@@ -373,7 +373,7 @@ function buildCreateText(
 		const present = recommended.some((key) => key in parsed.frontmatter);
 		if (!present) {
 			lines.push(
-				"tip: add platforms/requires/tags/related frontmatter — the smart index uses them for visibility filtering.",
+				"tip: add platforms/requires/dirs/tags/related frontmatter — the smart index uses them for visibility filtering.",
 			);
 		}
 	}
