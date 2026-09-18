@@ -4,6 +4,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	rmSync,
 	utimesSync,
 	writeFileSync,
@@ -12,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	formatList,
+	formatResult,
 	header,
 	MAX_WIDGET_ROWS,
 	widgetModel,
@@ -26,6 +28,7 @@ import {
 	JobRegistry,
 	sessionKeyFor,
 } from "../src/shell-bg/registry.ts";
+import { spawnToFile } from "../src/shell-bg/spawn.ts";
 import { readTail } from "../src/shell-bg/tail.ts";
 import type { Job } from "../src/shell-bg/types.ts";
 
@@ -109,9 +112,34 @@ describe("readTail", () => {
 		expect(split.text).toBe("nchen");
 	});
 
-	test("missing file yields empty", async () => {
+	test("missing file yields empty and is flagged unavailable", async () => {
 		const tail = await readTail(join(dir, "missing.log"), 100);
 		expect(tail.text).toBe("");
+		// Told apart from a command that simply printed nothing.
+		expect(tail.available).toBe(false);
+		const present = join(dir, "empty.log");
+		writeFileSync(present, "");
+		expect((await readTail(present, 100)).available).toBe(true);
+	});
+
+	test("an unreadable log reads as unavailable, not as no output", async () => {
+		const job: Job = {
+			id: "bg-9",
+			command: "echo hi",
+			cwd: dir,
+			pid: 1,
+			status: "done",
+			exitCode: 0,
+			signal: null,
+			logPath: join(dir, "gone.log"),
+			startedAt: Date.now(),
+			endedAt: Date.now(),
+			auto: false,
+			delivered: false,
+		};
+		expect(await formatResult(job, 100)).toContain("output unavailable");
+		writeFileSync(job.logPath, "");
+		expect(await formatResult(job, 100)).toContain("(no output)");
 	});
 });
 
@@ -187,6 +215,46 @@ describe("pending messages", () => {
 		]);
 		expect(list).toContain("bg-1 · running");
 		expect(list).toContain("bg-2 · failed · exit 1 · delivered");
+		expect(list).toContain("2 jobs this session · 1 running");
+	});
+
+	test("formatList caps rows, keeps totals true, and points at the rest", () => {
+		const jobs: Job[] = Array.from({ length: 25 }, (_, i) => ({
+			...base,
+			id: `bg-${i + 1}`,
+			status: "done",
+			exitCode: 0,
+			startedAt: 1_000 + i,
+			endedAt: 2_000 + i,
+		}));
+		const list = formatList(jobs, 5_000);
+		const rows = list.split("\n");
+		expect(rows[0]).toBe("25 jobs this session · 0 running · 10 shown");
+		// Header + 10 rows + the "and N more" line.
+		expect(rows).toHaveLength(12);
+		expect(rows[1]).toContain("bg-25");
+		expect(rows[10]).toContain("bg-16");
+		expect(rows[11]).toContain("… and 15 more");
+	});
+
+	test("formatList never lets finished jobs push out a running one", () => {
+		// The running job started first, so pure recency ordering would cut it.
+		const jobs: Job[] = [
+			{ ...base, id: "bg-1", status: "running", startedAt: 1_000 },
+			...Array.from({ length: 20 }, (_, i) => ({
+				...base,
+				id: `bg-${i + 2}`,
+				status: "done" as const,
+				exitCode: 0,
+				startedAt: 2_000 + i,
+				endedAt: 3_000 + i,
+			})),
+		];
+		const list = formatList(jobs, 5_000);
+		const rows = list.split("\n");
+		expect(rows[0]).toBe("21 jobs this session · 1 running · 10 shown");
+		expect(rows[1]).toContain("bg-1 · running");
+		expect(rows[11]).toContain("… and 11 more");
 	});
 });
 
@@ -276,6 +344,25 @@ describe("sessionKeyFor", () => {
 	});
 });
 
+describe("spawnToFile", () => {
+	test("an unopenable log path settles the job instead of crashing", async () => {
+		// The log dir does not exist — the write stream emits "error" async, and
+		// an unhandled 'error' event would take the whole pi host down.
+		const logPath = join(dir, "no-such-dir", "bg-1.log");
+		const spawned = spawnToFile(
+			process.execPath,
+			["-e"],
+			"console.log('hi')",
+			dir,
+			process.env,
+			logPath,
+		);
+		const exit = await spawned.exit;
+		expect(exit.code).toBe(0);
+		expect(existsSync(logPath)).toBe(false);
+	});
+});
+
 describe("gcSessionDirs", () => {
 	test("sweeps only stale siblings; fresh dirs and keepKey survive", () => {
 		const parent = mkdtempSync(join(tmpdir(), "sb-gc-"));
@@ -294,5 +381,37 @@ describe("gcSessionDirs", () => {
 		expect(existsSync(stale)).toBe(false);
 		expect(existsSync(keep)).toBe(true);
 		rmSync(parent, { recursive: true, force: true });
+	});
+
+	test("a stale dir whose owner process is alive is never swept", () => {
+		const parent = mkdtempSync(join(tmpdir(), "sb-gc-live-"));
+		const live = join(parent, "live-sess");
+		const dead = join(parent, "dead-sess");
+		for (const d of [live, dead]) mkdirSync(d);
+		// A live session that simply ran nothing for two days: old mtime, but
+		// the host process still owns the dir and needs its logs/ to exist.
+		writeFileSync(join(live, "owner.pid"), String(process.pid));
+		// pid 1 is init/launchd, never our host; stand-in for a dead owner is a
+		// pid we know is gone, so use an unused high pid instead.
+		writeFileSync(join(dead, "owner.pid"), "2147483645");
+		const now = Date.now();
+		const old = new Date(now - 48 * 3600_000);
+		utimesSync(live, old, old);
+		utimesSync(dead, old, old);
+		gcSessionDirs(parent, "keep-sess", 24 * 3600_000, now);
+		expect(existsSync(live)).toBe(true);
+		expect(existsSync(dead)).toBe(false);
+		rmSync(parent, { recursive: true, force: true });
+	});
+
+	test("a registry claims its dir for the running process", () => {
+		const base = mkdtempSync(join(tmpdir(), "sb-own-"));
+		new JobRegistry(base);
+		expect(readFileSync(join(base, "owner.pid"), "utf8")).toBe(
+			String(process.pid),
+		);
+		// The claim must not be mistaken for a job sidecar on load.
+		expect(new JobRegistry(base).load()).toHaveLength(0);
+		rmSync(base, { recursive: true, force: true });
 	});
 });

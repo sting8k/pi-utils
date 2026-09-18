@@ -17,7 +17,7 @@
  *     or substitution) route to the fs-search cores (US-001): caps, spill
  *     files, formatted rows — anything else runs in bash unchanged.
  *
- * `shell_status` polls or collects a job (and lists them all); `shell_kill`
+ * `shell_status` polls or collects a job (or lists the newest); `shell_kill`
  * terminates one and its whole tree. `/shell-bg` lists jobs, `/shell-bg kill
  * <id>` stops one; a widget above the editor shows running jobs. Delivery
  * only works in sessions that outlive the run, so auto-background is off
@@ -605,13 +605,15 @@ export default function shellBackground(pi: ExtensionAPI) {
 			label: "Shell status",
 			description:
 				"Check a background shell job: with id, returns its status and output so far (or its final " +
-				"result once finished); without id, lists every background job this session.",
+				"result once finished); without id, lists job counts for the session plus the newest rows, " +
+				"running jobs first.",
 			promptSnippet:
-				"Poll or collect background bash jobs; no id lists them all",
+				"Poll or collect background bash jobs; no id lists the newest",
 			parameters: Type.Object({
 				id: Type.Optional(
 					Type.String({
-						description: 'Job id, e.g. "bg-1" (omit to list all jobs)',
+						description:
+							'Job id, e.g. "bg-1" (omit for counts + the newest jobs)',
 					}),
 				),
 			}),

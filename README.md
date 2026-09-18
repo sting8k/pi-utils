@@ -94,12 +94,14 @@ Results are paths relative to the working directory, oldest first. When results 
 | `timeout: N` | Whole process tree killed past N seconds |
 
 ```
-shell_status()               # list every background job this session
+shell_status()               # counts + newest 10 rows, running jobs first
 shell_status(id="bg-2")      # one job: status + output so far (or final result)
 shell_kill(id="bg-2")        # stop it and its whole process tree
 ```
 
 In interactive sessions, finished jobs deliver themselves into the conversation wrapped in `<shell_bg_result id="...">`. A job that finishes while the agent is idle is delivered right away; jobs that finish mid-run wait until the run settles and arrive together in one message (pi drains follow-ups one per turn by default, so one message per job would cost a turn each). A finished job collected by hand via `shell_status` is not delivered again. Under headless `pi -p`, nothing is delivered after the turn ends — the tool's own message tells the model to poll `shell_status` within the turn.
+
+`shell_status` with no id leads with the totals (`21 jobs this session · 1 running · 10 shown`) and then lists at most 10 rows: running jobs first, then the newest finished ones, with `… and N more` for the rest. The registry keeps every job a session ever ran, so an uncapped list would eventually dump hundreds of rows into the context; what gets cut is a finished job whose result is already in the conversation, and `shell_status` with its id still returns it.
 
 ```
 /shell-bg                    # same list as shell_status()
