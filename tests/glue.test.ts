@@ -87,6 +87,41 @@ function fakeCtx(cwd: string, hasUI = false, idle = true): ExtensionContext {
 	} as unknown as ExtensionContext;
 }
 
+/**
+ * Wait until the named jobs have left "running" by reading the sidecars the
+ * registry persists. A fixed sleep flakes under full-suite load, and polling
+ * shell_status is not an option here: collecting a job marks it delivered,
+ * which is exactly what these tests are measuring.
+ */
+async function waitFinished(ids: string[], timeoutMs = 10_000): Promise<void> {
+	// Session-scoped registry dir for PI_SESSION_ID set in beforeAll.
+	const regDir = join(tmpdir(), "pi-utils-shell-bg", "pi-utils-tests");
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const settled = ids.every((id) => {
+			try {
+				const raw = readFileSync(join(regDir, `${id}.json`), "utf8");
+				return (JSON.parse(raw) as { status: string }).status !== "running";
+			} catch {
+				return false;
+			}
+		});
+		if (settled) return;
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	}
+	throw new Error(`jobs still running after ${timeoutMs}ms: ${ids.join(", ")}`);
+}
+
+/** The job id from a backgrounded bash result ("bg-7 started in the ..."). */
+function jobId(result: unknown): string {
+	const text = String(
+		(result as { content: Array<{ text: string }> }).content[0]?.text ?? "",
+	);
+	const id = /\b(bg-\d+)\b/.exec(text)?.[1];
+	if (!id) throw new Error(`no job id in result: ${text}`);
+	return id;
+}
+
 let agentDir = "";
 let root = "";
 
@@ -294,14 +329,16 @@ describe("shell-bg glue", () => {
 		await startSession(captured, fakeCtx(root));
 		const bash = captured.tools.find((t) => t.name === "bash");
 		if (!bash) throw new Error("bash tool missing");
-		await bash.execute(
+		const started = await bash.execute(
 			"t7",
 			{ command: "echo delivered-once", background: true },
 			undefined,
 			undefined,
 			fakeCtx(root),
 		);
-		await new Promise((resolve) => setTimeout(resolve, 900));
+		await waitFinished([jobId(started)]);
+		// The exit handler delivers on its own microtask after the sidecar write.
+		await new Promise((resolve) => setTimeout(resolve, 50));
 		const deliveries = captured.messages.filter(
 			(m) => m.message.customType === "pi-utils-shell-bg-result",
 		);
@@ -348,16 +385,29 @@ describe("shell-bg glue", () => {
 		const bash = captured.tools.find((t) => t.name === "bash");
 		if (!bash) throw new Error("bash tool missing");
 		const busy = fakeCtx(root, false, false);
-		for (const tag of ["batch-a", "batch-b"]) {
-			await bash.execute(
-				`t7-${tag}`,
-				{ command: `echo ${tag}`, background: true },
-				undefined,
-				undefined,
-				busy,
+		// Launched first (lower id) but finishes last, so the batch order can
+		// only come out right by sorting on completion — and two instant
+		// commands would finish within the same millisecond, making any order
+		// assertion a coin flip.
+		const commands = [
+			{ tag: "batch-late", command: "sleep 0.4; echo batch-late" },
+			{ tag: "batch-early", command: "echo batch-early" },
+		];
+		const ids: string[] = [];
+		for (const { tag, command } of commands) {
+			ids.push(
+				jobId(
+					await bash.execute(
+						`t7-${tag}`,
+						{ command, background: true },
+						undefined,
+						undefined,
+						busy,
+					),
+				),
 			);
 		}
-		await new Promise((resolve) => setTimeout(resolve, 900));
+		await waitFinished(ids);
 		const isDelivery = (m: Captured["messages"][number]) =>
 			m.message.customType === "pi-utils-shell-bg-result";
 		expect(captured.messages.filter(isDelivery).length).toBe(0);
@@ -367,10 +417,13 @@ describe("shell-bg glue", () => {
 		const deliveries = captured.messages.filter(isDelivery);
 		expect(deliveries.length).toBe(1);
 		const content = String(deliveries[0]?.message.content);
-		expect(content).toContain("batch-a");
-		expect(content).toContain("batch-b");
-		// Oldest finish first, not id order.
-		expect(content.indexOf("batch-a")).toBeLessThan(content.indexOf("batch-b"));
+		expect(content).toContain("batch-early");
+		expect(content).toContain("batch-late");
+		// Oldest finish first — the later-finishing job has the lower id, so id
+		// order would put them the other way round.
+		expect(content.indexOf("batch-early")).toBeLessThan(
+			content.indexOf("batch-late"),
+		);
 		// Settling again with nothing new delivers nothing.
 		for (const handler of captured.handlers.get("agent_settled") ?? []) {
 			await handler({ type: "agent_settled" }, busy);
