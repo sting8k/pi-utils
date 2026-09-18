@@ -9,6 +9,13 @@ import { open } from "node:fs/promises";
 export interface Tail {
 	text: string;
 	bytes: number;
+	/**
+	 * False when the log could not be opened at all. Without this an
+	 * unreadable log is indistinguishable from a command that printed
+	 * nothing, and the job result claims "(no output)" for output that was
+	 * produced and lost.
+	 */
+	available: boolean;
 }
 
 export async function readTail(
@@ -19,7 +26,7 @@ export async function readTail(
 	try {
 		handle = await open(logPath, "r");
 	} catch {
-		return { text: "", bytes: 0 };
+		return { text: "", bytes: 0, available: false };
 	}
 	try {
 		const size = (await handle.stat()).size;
@@ -41,6 +48,7 @@ export async function readTail(
 		return {
 			text: buffer.subarray(begin).toString("utf8"),
 			bytes: length - begin,
+			available: true,
 		};
 	} finally {
 		await handle.close();

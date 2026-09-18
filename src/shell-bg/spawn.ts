@@ -39,6 +39,13 @@ export function spawnToFile(
 ): Spawned {
 	// Append so a re-attach or racing read never clips output already written.
 	const out = createWriteStream(logPath, { flags: "a" });
+	// A write stream reports an unopenable path by EMITTING "error", not by
+	// throwing — with no listener that is an unhandled 'error' event, which
+	// takes the whole pi host down. Reachable whenever the log path stops
+	// being writable: the session dir swept from under us, a full disk, lost
+	// permissions. The job still settles on process exit; the missing output
+	// is reported honestly by readTail (see tail.ts).
+	out.on("error", () => {});
 
 	let child: ChildProcess;
 	try {
