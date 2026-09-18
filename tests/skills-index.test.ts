@@ -60,6 +60,7 @@ function transform(
 		fullLimit?: number;
 		recentlyUsed?: string[];
 		requires?: (bin: string) => boolean;
+		cwd?: string;
 	} = {},
 ) {
 	const prompt = `preamble\n${nativeBlock(entries)}\nepilogue`;
@@ -72,6 +73,7 @@ function transform(
 			{
 				skillsRoot: root,
 				knownRoots: [root],
+				cwd: opts.cwd ?? "/home/proj",
 				hostPlatform: opts.hostPlatform ?? "darwin",
 				requiresCheck: opts.requires ?? (() => true),
 				metaCache,
@@ -185,6 +187,39 @@ describe("smart index transform (US-004)", () => {
 		expect(result.hidden).toEqual(["needs-tool"]);
 	});
 
+	test("dirs: exact cwd-segment scoping, scalar normalize, no substring", () => {
+		const entries = [
+			skill("pinned", {
+				name: "pinned",
+				description: "d",
+				dirs: ["pi-utilities"],
+			}),
+			skill("family", {
+				name: "family",
+				description: "d",
+				dirs: ["pi-agent-ext"],
+			}),
+			skill("elsewhere", {
+				name: "elsewhere",
+				description: "d",
+				dirs: "other-repo", // scalar shorthand
+			}),
+			skill("noscoped", { name: "noscoped", description: "d" }),
+			skill("substr", { name: "substr", description: "d", dirs: ["pi-util"] }),
+		];
+		const { result } = transform(entries, {
+			cwd: "/a/pi-agent-ext/pi-utilities",
+		});
+		if (!result) return expect(result).not.toBeNull();
+		expect(result.hidden).toEqual(["elsewhere", "substr"]);
+		expect(result.block).toContain('"pinned"'); // one-segment repo pinned
+		expect(result.block).toContain('"family"'); // ancestor segment
+		expect(result.block).toContain('"noscoped"'); // absent key → shown
+		expect(result.block).not.toContain('"elsewhere"');
+		expect(result.block).not.toContain('"substr"'); // no substring match
+		expect(result.block).toMatch(/2 more — ls .+ or \/skill:<name>/);
+	});
+
 	test("disable-model-invocation hidden (belt-and-suspenders)", () => {
 		const entries = [
 			skill("slash-only", {
@@ -250,6 +285,7 @@ describe("smart index transform (US-004)", () => {
 			transformSkillsIndex("no block at all", 50, [], {
 				skillsRoot: root,
 				knownRoots: [root],
+				cwd: "/home/proj",
 				hostPlatform: "darwin",
 				requiresCheck: () => true,
 				metaCache,
@@ -261,6 +297,7 @@ describe("smart index transform (US-004)", () => {
 			transformSkillsIndex(broken, 50, [], {
 				skillsRoot: root,
 				knownRoots: [root],
+				cwd: "/home/proj",
 				hostPlatform: "darwin",
 				requiresCheck: () => true,
 				metaCache,

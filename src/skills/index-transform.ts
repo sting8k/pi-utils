@@ -13,13 +13,13 @@
  * we only decide how loudly each shows.
  *
  * Pipeline: platforms excludes host → requires missing from PATH →
- * disable-model-invocation → over-limit demotion (names-only) → quality
- * flags → tail pointer.
+ * dirs declares no segment of cwd → disable-model-invocation →
+ * over-limit demotion (names-only) → quality flags → tail pointer.
  *
  * Pure module: fs access injectable for tests.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, relative } from "node:path";
+import { basename, dirname, relative, sep } from "node:path";
 import { parseFrontmatterLenient } from "./frontmatter.ts";
 
 export interface SkillIndexEntry {
@@ -31,6 +31,7 @@ export interface SkillIndexEntry {
 export interface SkillMeta {
 	platforms?: unknown;
 	requires?: unknown;
+	dirs?: unknown;
 	disableModelInvocation?: unknown;
 	/** Frontmatter failed to parse at all — flagged, not hidden. */
 	malformed?: boolean;
@@ -42,6 +43,8 @@ export interface IndexTransformDeps {
 	knownRoots: string[];
 	/** Host platform (process.platform at the call site). */
 	hostPlatform: string;
+	/** Session cwd — dirs visibility matches its path segments exactly. */
+	cwd: string;
 	/** Binary-on-PATH check (session-cached by the caller). */
 	requiresCheck: (bin: string) => boolean;
 	/** Frontmatter cache keyed by SKILL.md path — caller persists per session. */
@@ -93,6 +96,7 @@ export function transformSkillsIndex(
 	const visible: Array<{ entry: SkillIndexEntry; meta: SkillMeta | null }> = [];
 	const hidden: string[] = [];
 	const hostNames = hostPlatformNames(deps.hostPlatform);
+	const cwdSegments = deps.cwd.split(sep).filter((s) => s.length > 0);
 	for (const entry of entries) {
 		const meta = metaFor(entry.location, deps);
 		const platforms = stringArray(meta?.platforms);
@@ -102,6 +106,11 @@ export function transformSkillsIndex(
 		}
 		const requires = stringArray(meta?.requires);
 		if (requires.some((bin) => !deps.requiresCheck(bin))) {
+			hidden.push(entry.name);
+			continue;
+		}
+		const dirs = stringArray(meta?.dirs);
+		if (dirs.length > 0 && !dirs.some((d) => cwdSegments.includes(d))) {
 			hidden.push(entry.name);
 			continue;
 		}
@@ -261,6 +270,7 @@ function readMeta(
 	return {
 		platforms: fm.platforms,
 		requires: fm.requires,
+		dirs: fm.dirs,
 		disableModelInvocation: fm["disable-model-invocation"],
 	};
 }

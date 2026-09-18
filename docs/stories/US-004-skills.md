@@ -8,6 +8,10 @@ create/guard/patch-diff/delete round-trip; nudge fire-once x3
 independent sessions). Emit-format delta (group-by-root, collision
 location) approved post-smoke — landing as follow-up.
 
+Follow-up 2026-09-18 (bean-approved): `dirs:` visibility condition —
+see "Pipeline per entry" step 3 + acceptance. Owner: Peanut
+implements, Dario integrates/verifies, no push before bean.
+
 ## Lane
 
 normal
@@ -129,7 +133,7 @@ error message names the way out.
   prompt-bloat concern, not a routing blocker; keep it advisory.)
 - unknown fields pass through (native flags like
   `disable-model-invocation` untouched)
-- `platforms` / `requires` / `tags` / `related` are
+- `platforms` / `requires` / `dirs` / `tags` / `related` are
   tolerated-but-recommended: `create` response nudges including them
   (one line) — v2 filtering via `before_agent_start` can consume the
   data on day one, no backfill
@@ -190,16 +194,27 @@ Pipeline per entry:
    no-op; same for `requires`)
 2. `requires` binary missing from PATH (`which`, cached/session) →
    hidden
-3. `disable-model-invocation` → hidden (slash-only contract — same
+3. `dirs` declared and no entry equals a **path segment of
+   `ctx.cwd`** → hidden. Exact segment match, case-sensitive, no
+   glob/substring; scalar shorthand normalizes like `platforms`.
+   Segment (not basename) so `dirs: [pi-agent-ext]` scopes a global
+   skill to every repo under that parent, while `dirs:
+   [pi-utilities]` pins one repo. Absent key → always shown (opt-in,
+   same as 1–2; never required at write time). Not exempted by
+   recently-used — consistent with 1–2. For a skill that belongs to
+   ONE repo, native project skills (`<repo>/.pi/skills/`) remain
+   the right tool; `dirs` is for global skills scoped to a family of
+   repos or ones you don't want committed.
+4. `disable-model-invocation` → hidden (slash-only contract — same
    as native)
-4. count > `skills.index_full_limit` (default 50) → categories
+5. count > `skills.index_full_limit` (default 50) → categories
    without recently-used skills collapse to names-only.
    "Recently-used" = SKILL.md read this session via our read
    tracking (same seen-map as the write guard) — session-scoped,
    no persistence in v1
-5. quality flags: `⚠ missing description`, `⚠ possible overlap a≈b`
+6. quality flags: `⚠ missing description`, `⚠ possible overlap a≈b`
    (same category + near-identical desc prefix)
-6. tail pointer when anything hidden/demoted:
+7. tail pointer when anything hidden/demoted:
    `N more — ls ~/.pi/agent/skills/ or /skill:<name>`
 
 Data sources are split on purpose: **which skills exist** comes from
@@ -277,6 +292,11 @@ defaults).
   `requires:[bogus-bin]` absent; >limit → names-only demotion +
   pointer; malformed frontmatter → `⚠` flag; unparseable native
   block → passthrough
+- smart mode `dirs`: cwd `/a/pi-agent-ext/pi-utilities` — `dirs:
+  [pi-utilities]` shown, `dirs: [pi-agent-ext]` shown (ancestor
+  segment), `dirs: other-repo` (scalar) hidden + counted in the
+  tail pointer, no `dirs` key shown; `dirs: [pi-util]` hidden (no
+  substring match)
 
 ## Validation
 

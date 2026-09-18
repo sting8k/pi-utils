@@ -143,6 +143,7 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 				{
 					skillsRoot,
 					knownRoots: scanRoots(skillsRoot, ctx.cwd),
+					cwd: ctx.cwd,
 					hostPlatform: process.platform,
 					requiresCheck,
 					metaCache,
