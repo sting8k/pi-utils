@@ -33,6 +33,23 @@ function isAlive(pid: number | null): boolean {
 	}
 }
 
+/** Name of the pid claim file written into each session registry dir. */
+const OWNER_FILE = "owner.pid";
+
+function ownerAlive(dir: string): boolean {
+	try {
+		const pid = Number.parseInt(
+			readFileSync(join(dir, OWNER_FILE), "utf8"),
+			10,
+		);
+		return Number.isFinite(pid) && isAlive(pid);
+	} catch {
+		// No claim file (dir predates this, or was never claimed): nothing to
+		// protect, fall back to the age rule alone.
+		return false;
+	}
+}
+
 function isJob(value: unknown): value is Job {
 	return (
 		isRecord(value) &&
@@ -51,6 +68,15 @@ export class JobRegistry {
 	constructor(baseDir: string) {
 		this.baseDir = baseDir;
 		mkdirSync(join(baseDir, "logs"), { recursive: true });
+		// Claim the dir for this host process so a sibling session's sweep can
+		// see it is in use (see gcSessionDirs). Rewritten on every session_start,
+		// including a resume of this same session id, so the pid is never stale
+		// while the dir is live. Not a ".json" file, so load() ignores it.
+		try {
+			writeFileSync(join(baseDir, OWNER_FILE), String(process.pid));
+		} catch {
+			// Best effort: a dir we cannot claim still works for this session.
+		}
 	}
 
 	logPathFor(id: string): string {
@@ -158,6 +184,15 @@ export function sessionKeyFor(
  * Best-effort sweep of sibling session dirs older than maxAgeMs. keepKey (the
  * current session) always survives; failures are swallowed — the sweep runs
  * again next session.
+ *
+ * Age is the trigger, a live owner pid is a veto. Two different questions:
+ * mtime answers "has this been idle long enough to look abandoned", the pid
+ * answers "is a process using it right now". Age alone can delete the dir of a
+ * LIVE session that simply ran no command for maxAgeMs (an empty dir's mtime
+ * never moves at all) — which pulls the log dir out from under a running
+ * session. The pid is deliberately not the delete criterion: a session id is
+ * resumable after pi exits, so a dead owner does not make the jobs garbage,
+ * only eligible once they are also old.
  */
 export function gcSessionDirs(
 	parent: string,
@@ -175,9 +210,9 @@ export function gcSessionDirs(
 		if (name === keepKey) continue;
 		const dir = join(parent, name);
 		try {
-			if (statSync(dir).mtimeMs < now - maxAgeMs) {
-				rmSync(dir, { recursive: true, force: true });
-			}
+			if (statSync(dir).mtimeMs >= now - maxAgeMs) continue;
+			if (ownerAlive(dir)) continue;
+			rmSync(dir, { recursive: true, force: true });
 		} catch {
 			// Unreadable or racing — leave it for the next sweep.
 		}
