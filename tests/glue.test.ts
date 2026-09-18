@@ -313,6 +313,33 @@ describe("shell-bg glue", () => {
 		});
 	});
 
+	test("foreground jobs are never delivered at agent_settled", async () => {
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/shell-bg.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const bash = captured.tools.find((t) => t.name === "bash");
+		if (!bash) throw new Error("bash tool missing");
+		// Plain foreground run: its output was the tool result already. It stays
+		// in the registry finished-and-undelivered forever, and must not be
+		// swept into a delivery when the run settles.
+		await bash.execute(
+			"t7-fg",
+			{ command: "echo foreground-only" },
+			undefined,
+			undefined,
+			fakeCtx(root),
+		);
+		for (const handler of captured.handlers.get("agent_settled") ?? []) {
+			await handler({ type: "agent_settled" }, fakeCtx(root));
+		}
+		expect(
+			captured.messages.filter(
+				(m) => m.message.customType === "pi-utils-shell-bg-result",
+			).length,
+		).toBe(0);
+	});
+
 	test("jobs finishing mid-run wait and ship together at agent_settled", async () => {
 		const { api, captured } = fakePi();
 		const mod = await import("../extensions/shell-bg.ts");
@@ -342,6 +369,8 @@ describe("shell-bg glue", () => {
 		const content = String(deliveries[0]?.message.content);
 		expect(content).toContain("batch-a");
 		expect(content).toContain("batch-b");
+		// Oldest finish first, not id order.
+		expect(content.indexOf("batch-a")).toBeLessThan(content.indexOf("batch-b"));
 		// Settling again with nothing new delivers nothing.
 		for (const handler of captured.handlers.get("agent_settled") ?? []) {
 			await handler({ type: "agent_settled" }, busy);

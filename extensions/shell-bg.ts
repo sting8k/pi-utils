@@ -254,17 +254,33 @@ export default function shellBackground(pi: ExtensionAPI) {
 	});
 
 	/**
-	 * Push every finished, not-yet-delivered job into the conversation as one
-	 * message. Runs when a job exits while the agent is idle, and after each
-	 * agent run settles — jobs that finish mid-run wait and ship together.
+	 * Jobs whose result this session still owes the conversation — only ones
+	 * that actually went to the background. Foreground jobs returned their
+	 * output as the tool result and must never be delivered; the persisted
+	 * `delivered` flag cannot tell the two apart (a foreground job is finished
+	 * and undelivered forever), so membership is tracked here instead. In
+	 * memory on purpose: after a /reload nobody is awaiting the old jobs.
+	 */
+	const awaitingDelivery = new Set<string>();
+
+	/**
+	 * Push every backgrounded job that has finished into the conversation as
+	 * one message, oldest finish first. Runs when a job exits while the agent
+	 * is idle, and after each agent run settles — jobs that finish mid-run wait
+	 * and ship together.
 	 */
 	async function deliverFinished(): Promise<void> {
 		if (!registry) return;
 		const jobs = registry
 			.all()
-			.filter((job) => isFinished(job) && !job.delivered);
+			.filter(
+				(job) =>
+					awaitingDelivery.has(job.id) && isFinished(job) && !job.delivered,
+			)
+			.sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
 		if (jobs.length === 0) return;
 		for (const job of jobs) {
+			awaitingDelivery.delete(job.id);
 			job.delivered = true;
 			registry.persist(job);
 		}
@@ -295,7 +311,8 @@ export default function shellBackground(pi: ExtensionAPI) {
 	/** Deliver a background job when it exits — now if the agent is idle, else
 	 * with its siblings at agent_settled (pi drains follow-ups one per turn by
 	 * default, so a message per job would cost a turn each). */
-	function scheduleDelivery(exit: Promise<unknown>): void {
+	function scheduleDelivery(job: Job, exit: Promise<unknown>): void {
+		awaitingDelivery.add(job.id);
 		exit
 			.then(() => {
 				if (lastUiCtx?.isIdle?.() === false) return;
@@ -441,7 +458,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 		});
 
 		if (params.background === true) {
-			scheduleDelivery(settle);
+			scheduleDelivery(job, settle);
 			const r = backgroundedResult({
 				id: job.id,
 				command,
@@ -491,7 +508,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 				job.auto = true;
 				registry.persist(job);
 				renderWidget(ctx);
-				scheduleDelivery(settle);
+				scheduleDelivery(job, settle);
 				const r = backgroundedResult({
 					id: job.id,
 					command,
@@ -618,6 +635,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 				}
 				const text = await formatResult(job, settings.shellBg.tailBytes);
 				// Collected by hand: the conversation has it, no delivery needed.
+				awaitingDelivery.delete(job.id);
 				if (!job.delivered) {
 					job.delivered = true;
 					registry.persist(job);
