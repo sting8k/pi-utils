@@ -169,7 +169,8 @@ describe("pending messages", () => {
 			collectWith: "shell_status",
 		});
 		expect(r.text).toContain("still running after 45s");
-		expect(r.text).toContain("shell_status");
+		expect(r.text).toContain("it wakes you");
+		expect(r.text).toContain("do not need to poll shell_status");
 		expect(r.details.pollRequired).toBe(false);
 	});
 
@@ -190,6 +191,8 @@ describe("pending messages", () => {
 		const m = deliveryMessage([{ id: "bg-1", body: "exit 0\nok" }]);
 		expect(m).toContain('<shell_bg_result id="bg-1">');
 		expect(m).toContain("This is bg-1");
+		expect(m).toContain("background wake-up");
+		expect(m).toContain("never need to poll");
 		expect(DELIVERY_TYPE).toBe("pi-utils-shell-bg-result");
 	});
 

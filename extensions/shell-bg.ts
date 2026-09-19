@@ -497,12 +497,28 @@ export default function shellBackground(pi: ExtensionAPI) {
 			streamTimer.unref?.();
 		}
 
-		const onAbort = () => undefined;
-		signal?.addEventListener("abort", onAbort, { once: true });
+		// Esc during the foreground window must actually stop the command —
+		// returning an abort error while the tree still runs leaves an orphan
+		// writing the log. killTree is idempotent-ish on a dead pid; settle
+		// already resolves on its own so we only need to fire the kill.
+		const onAbort = () => {
+			if (job.status === "running") {
+				job.killedByUs = true;
+				killTree(job.pid, settings.shellBg.killGraceMs);
+			}
+		};
+		// A signal already aborted before we subscribe never fires the listener,
+		// so run the kill check now — otherwise the command would spawn and hang
+		// at `await settle` until it exits on its own.
+		if (signal?.aborted) onAbort();
+		else signal?.addEventListener("abort", onAbort, { once: true });
 
 		try {
 			const winner = await Promise.race(racers);
-			if (signal?.aborted) throw new Error("Operation aborted");
+			if (signal?.aborted) {
+				await settle;
+				throw new Error("Operation aborted");
+			}
 
 			if (winner === "auto") {
 				job.auto = true;
@@ -542,8 +558,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 
 			// exit — also covers the abort race losing to a fast exit.
 			await settle;
-			if (signal?.aborted && job.status === "running")
-				throw new Error("Operation aborted");
+			if (signal?.aborted) throw new Error("Operation aborted");
 			const body = await formatResult(job, settings.shellBg.tailBytes);
 			const head = job.signal
 				? `Killed (signal ${job.signal}).`

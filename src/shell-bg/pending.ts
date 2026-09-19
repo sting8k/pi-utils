@@ -57,9 +57,10 @@ export function backgroundedResult(
 	const line = `  $ ${clip(input.command)}`;
 	const tail = input.interactive
 		? [
-				"Its result is delivered here automatically when it finishes, so carry on with other",
-				`work. ${input.collectWith} with id "${input.id}" is only if you want it early, and ${input.collectWith}`,
-				"with no id lists everything still running.",
+				"Its result is delivered here automatically when it finishes — it wakes you, so you",
+				`do not need to poll ${input.collectWith} for it. Carry on with other work; call`,
+				`${input.collectWith} with id "${input.id}" only if you want it early, and`,
+				`${input.collectWith} with no id lists everything still running.`,
 			]
 		: [
 				"This is a headless run: nothing is delivered after your turn ends. Call",
@@ -108,7 +109,10 @@ export function deliveryMessage(jobs: DeliveredJob[]): string {
 		...blocks,
 		"",
 		intro,
-		"Fold it into what you are doing. If you had already moved on, say what it changes — or that it changes nothing.",
+		"This is the background wake-up — it arrives on its own, so you never need to poll",
+		"shell_status to keep waiting on a background job; still-running jobs will wake you",
+		"the same way when they finish. Fold this into what you are doing;",
+		"if you had already moved on, say what it changes — or that it changes nothing.",
 	].join("\n");
 }
 
