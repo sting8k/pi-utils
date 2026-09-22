@@ -57,15 +57,13 @@ export function backgroundedResult(
 	const line = `  $ ${clip(input.command)}`;
 	const tail = input.interactive
 		? [
-				"Its result is delivered here automatically when it finishes — it wakes you, so you",
-				`do not need to poll ${input.collectWith} for it. Carry on with other work; call`,
-				`${input.collectWith} with id "${input.id}" only if you want it early, and`,
-				`${input.collectWith} with no id lists everything still running.`,
+				"The result is pushed here on completion — no need to poll",
+				`(${input.collectWith}). Carry on; ${input.collectWith} id "${input.id}" = early`,
+				`result, ${input.collectWith} with no id = list jobs.`,
 			]
 		: [
-				"This is a headless run: nothing is delivered after your turn ends. Call",
-				`${input.collectWith} with id "${input.id}" again in this same turn until it reports finished —`,
-				"do not end your turn expecting the result to arrive on its own.",
+				"Headless run: nothing is delivered after this turn. Re-call",
+				`${input.collectWith} id "${input.id}" until it reports finished.`,
 			];
 	return {
 		text: [head, line, "", ...tail].join("\n"),
@@ -101,18 +99,14 @@ export function deliveryMessage(jobs: DeliveredJob[]): string {
 		].join("\n"),
 	);
 	const ids = jobs.map((job) => job.id).join(", ");
-	const intro =
-		jobs.length === 1
-			? `This is ${ids}, a command you sent to the background; it has just finished and this is its result.`
-			: `These are ${ids}, commands you sent to the background; they have finished and these are their results.`;
+	const what = jobs.length === 1 ? "job" : "jobs";
+	const intro = `${ids} — background ${what} finished, result${jobs.length === 1 ? "" : "s"} above.`;
 	return [
 		...blocks,
 		"",
 		intro,
-		"This is the background wake-up — it arrives on its own, so you never need to poll",
-		"shell_status to keep waiting on a background job; still-running jobs will wake you",
-		"the same way when they finish. Fold this into what you are doing;",
-		"if you had already moved on, say what it changes — or that it changes nothing.",
+		"Background results wake you on completion — no need to poll (shell_status).",
+		"Fold into your work; if you had moved on, say whether it changes anything.",
 	].join("\n");
 }
 

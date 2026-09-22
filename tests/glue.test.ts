@@ -283,7 +283,7 @@ describe("shell-bg glue", () => {
 		expect(started.content[0]?.text).toContain("started in the background");
 
 		// Headless ctx: message says polling is required.
-		expect(started.content[0]?.text).toContain("headless run");
+		expect(started.content[0]?.text).toContain("Headless run");
 
 		// Give the detached echo a moment to finish, then collect.
 		await new Promise((resolve) => setTimeout(resolve, 700));
