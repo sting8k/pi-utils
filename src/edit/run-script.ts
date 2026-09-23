@@ -16,6 +16,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { writeSpill } from "../common/tempfile.ts";
 import { killTree } from "../shell-bg/kill.ts";
+import { withPrelude } from "./prelude.ts";
 import { type PathSnapshot, snapshotPaths } from "./snapshot.ts";
 
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -330,7 +331,7 @@ export function runEditScript(
 			const stdin = child.stdin;
 			if (stdin) {
 				stdin.on("error", () => {});
-				stdin.write(code);
+				stdin.write(withPrelude(lang, code));
 				stdin.end();
 			}
 		});

@@ -83,7 +83,7 @@ export function normalizeEditArgs(input: unknown): Record<string, unknown> {
 }
 
 const MINIMAL_EXAMPLE =
-	'{"code": "import pathlib\\np = pathlib.Path(\'a.txt\')\\np.write_text(p.read_text().replace(\'old\', \'new\'))", "paths": ["a.txt"]}';
+	'{"code": "replace_once(\'a.txt\', \'old\', \'new\')", "paths": ["a.txt"]}';
 
 /** Validate normalized args; throws errors that name the fix. */
 export function resolveEditArgs(raw: Record<string, unknown>): EditScriptArgs {

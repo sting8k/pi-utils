@@ -53,7 +53,7 @@ import {
 
 const DIFF_MAX_LINES = 200;
 const DIFF_MAX_BYTES = 50 * 1024;
-const STDERR_EXCERPT_BYTES = 2000;
+const OUTPUT_EXCERPT_CHARS = 2000;
 
 export default function editExtension(pi: ExtensionAPI) {
 	let settings: PiUtilsSettings = DEFAULT_SETTINGS;
@@ -80,6 +80,8 @@ export default function editExtension(pi: ExtensionAPI) {
 			promptGuidelines: [
 				"Declare every file the script may touch in paths — the tool can only diff and roll back declared paths.",
 				'Review the returned diff — a script that matched nothing still exits 0; check the "no declared file changed" warning.',
+				"The script's stdout/stderr is shown to you — print what it matched or skipped instead of re-reading files.",
+				"For anchored text replacements call the preloaded replace_once(path, old, new, count=1) (node: replaceOnce) instead of a bare replace — a match-count mismatch exits non-zero and rolls every declared path back.",
 				"Do not embed large file contents or payloads in code — the script reads from disk; for large content, write the file first, then read it from the script.",
 				"Do not shell out from the script (subprocess/os.system) — when a shell command is needed, call the bash tool directly.",
 			],
@@ -191,10 +193,7 @@ function buildResult(
 				`RESTORE FAILED for: ${outcome.restoreFailures.join(", ")} — manual inspection required.`,
 			);
 		}
-		const stderrExcerpt = outcome.stderr.slice(0, STDERR_EXCERPT_BYTES);
-		if (stderrExcerpt.trim().length > 0) {
-			lines.push(`stderr:\n${stderrExcerpt}`);
-		}
+		lines.push(...scriptOutput(outcome));
 		if (outcome.spawnError) lines.push(outcome.spawnError);
 		return {
 			content: [{ type: "text", text: lines.join("\n") }],
@@ -214,10 +213,13 @@ function buildResult(
 	}
 
 	const changes: FileChange[] = outcome.changes;
-	const hunks = changes.flatMap((change) =>
-		diffHunks(change.oldContent ?? "", change.newContent ?? ""),
-	);
+	const perFile = changes.map((change) => ({
+		change,
+		hunks: diffHunks(change.oldContent ?? "", change.newContent ?? ""),
+	}));
+	const hunks = perFile.flatMap((file) => file.hunks);
 	const counts = countChanges(hunks);
+	const output = scriptOutput(outcome);
 
 	const details: Record<string, unknown> = {
 		...shared,
@@ -231,14 +233,27 @@ function buildResult(
 			content: [
 				{
 					type: "text",
-					text: "WARNING: script exited 0 but no declared file changed — the script matched nothing or wrote only outside the declared paths.",
+					text: [
+						"WARNING: script exited 0 but no declared file changed — the script matched nothing or wrote only outside the declared paths.",
+						...output,
+					].join("\n"),
 				},
 			],
 			details: { ...details, diff: "", patch: "", firstChangedLine: undefined },
 		};
 	}
 
-	const rendered = formatDiffs(hunks);
+	// One titled block per file: multi-file hunks stay attributable.
+	const rendered = perFile
+		.map(({ change, hunks: fileHunks }) =>
+			formatDiffs(
+				fileHunks,
+				change.kind === "modified"
+					? change.path
+					: `${change.path} (${change.kind})`,
+			),
+		)
+		.join("\n\n");
 	const patch = unifiedPatch(
 		changes.map((change) => ({
 			path: change.path,
@@ -251,10 +266,34 @@ function buildResult(
 	details.firstChangedLine = hunks[0]?.newStart;
 
 	const header = `script edit: ${changes.length} file(s) changed (+${counts.additions}/-${counts.removals}).`;
-	return {
-		content: [{ type: "text", text: `${header}\n${capDiff(rendered)}` }],
-		details,
-	};
+	// Script output sits above the diff so the diff cap can never hide it.
+	const text = [header, ...output, capDiff(rendered)].join("\n");
+	return { content: [{ type: "text", text }], details };
+}
+
+/**
+ * What the model sees of the script's own output: snapshot warnings, then a
+ * head excerpt of stdout/stderr. A cut excerpt spills the full captured
+ * stream; output past the 1MB capture cap is already in outcome.spillPath.
+ */
+function scriptOutput(outcome: ScriptOutcome): string[] {
+	const lines = outcome.warnings.map((warning) => `warning: ${warning}`);
+	for (const name of ["stdout", "stderr"] as const) {
+		const full = outcome[name];
+		if (full.trim().length === 0) continue;
+		if (full.length <= OUTPUT_EXCERPT_CHARS) {
+			lines.push(`${name}:\n${full.trimEnd()}`);
+			continue;
+		}
+		const spill = writeSpill(`edit-${name}`, full);
+		lines.push(
+			`${name}:\n${full.slice(0, OUTPUT_EXCERPT_CHARS)}\n[${name} truncated — full at ${spill}]`,
+		);
+	}
+	if (outcome.spillPath) {
+		lines.push(`[output past the 1MB capture cap at ${outcome.spillPath}]`);
+	}
+	return lines;
 }
 
 /** Cap the rendered diff at ~200 lines / 50KB; overflow spills to a temp file. */

@@ -87,6 +87,64 @@ describe("runEditScript — success paths", () => {
 		expect(outcome.changes[0]?.kind).toBe("modified");
 	});
 
+	test("python replace_once: exact match edits, a miss rolls everything back", async () => {
+		const a = join(root, "ro-a.txt");
+		const b = join(root, "ro-b.txt");
+		writeFileSync(a, "alpha\n");
+		writeFileSync(b, "beta\r\n");
+		const run = (code: string) =>
+			runEditScript({
+				code,
+				paths: [a, b],
+				lang: "python",
+				timeoutSec: 10,
+				cwd: root,
+			});
+
+		const ok = await run(
+			`print(replace_once(${JSON.stringify(a)}, "alpha", "ALPHA"))\nreplace_once(${JSON.stringify(b)}, "beta", "BETA")`,
+		);
+		expect(ok.ok).toBe(true);
+		expect(ok.stdout.trim()).toBe("1");
+		expect(readFileSync(b, "utf8")).toBe("BETA\r\n"); // CRLF untouched
+
+		const miss = await run(
+			`replace_once(${JSON.stringify(a)}, "ALPHA", "x")\nreplace_once(${JSON.stringify(b)}, "nope", "y")`,
+		);
+		expect(miss.ok).toBe(false);
+		expect(miss.stderr).toContain("expected 1 match(es) of 'nope'");
+		expect(readFileSync(a, "utf8")).toBe("ALPHA\n"); // first edit rolled back
+	});
+
+	test("python errors keep the agent's own line numbers", async () => {
+		const outcome = await runEditScript({
+			code: "x = 1\nraise ValueError('boom')",
+			paths: [join(root, "ro-lines.txt")],
+			lang: "python",
+			timeoutSec: 10,
+			cwd: root,
+		});
+		expect(outcome.ok).toBe(false);
+		expect(outcome.stderr).toContain('File "<edit>", line 2');
+	});
+
+	test("node replaceOnce: a miss exits non-zero and rolls back", async () => {
+		const file = join(root, "ro-node.txt");
+		writeFileSync(file, "one $1 two\n");
+		const outcome = await runEditScript({
+			code: `replaceOnce(${JSON.stringify(file)}, "$1", "$&");\nreplaceOnce(${JSON.stringify(file)}, "missing", "x");`,
+			paths: [file],
+			lang: "node",
+			timeoutSec: 10,
+			cwd: root,
+		});
+		expect(outcome.ok).toBe(false);
+		if (outcome.ok) return;
+		expect(outcome.stderr).toContain('expected 1 match(es) of "missing"');
+		expect(outcome.dirtyBeforeRestore).toEqual([file]);
+		expect(readFileSync(file, "utf8")).toBe("one $1 two\n");
+	});
+
 	test("creation and deletion of declared paths are reported", async () => {
 		const created = join(root, "created.txt");
 		const deleted = join(root, "deleted.txt");

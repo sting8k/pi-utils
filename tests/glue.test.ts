@@ -577,8 +577,8 @@ describe("edit glue (US-003)", () => {
 		const edit = captured.tools.find((t) => t.name === "edit");
 		expect(edit).toBeTruthy();
 		expect(edit?.description).toContain("script");
-		// Steering lives in promptGuidelines (4 bullets), not the description.
-		expect(edit?.promptGuidelines).toHaveLength(4);
+		// Steering lives in promptGuidelines (6 bullets), not the description.
+		expect(edit?.promptGuidelines).toHaveLength(6);
 	});
 
 	test('edit is skipped under disabledTools: ["edit"]', async () => {
@@ -625,6 +625,41 @@ describe("edit glue (US-003)", () => {
 		expect(result.details.filesChanged).toEqual(["edit-glue.txt"]);
 		expect(result.details.patch).toContain("--- a/edit-glue.txt");
 		expect(readFileSync(target, "utf8")).toBe("alpha\nBETA\n");
+	});
+
+	test("edit execute: multi-file diff is titled per file; script stdout is shown", async () => {
+		const a = join(root, "edit-multi-a.txt");
+		const b = join(root, "edit-multi-b.txt");
+		writeFileSync(a, "one\n");
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/edit.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const edit = captured.tools.find((t) => t.name === "edit");
+		if (!edit) throw new Error("edit tool missing");
+		const run = async (code: string) =>
+			(await edit.execute(
+				"e3",
+				{ code, paths: ["edit-multi-a.txt", "edit-multi-b.txt"], lang: "node" },
+				undefined,
+				undefined,
+				fakeCtx(root),
+			)) as { content: Array<{ type: string; text: string }> };
+
+		const changed = await run(
+			`const fs = require("node:fs");\nfs.writeFileSync(${JSON.stringify(a)}, "ONE\\n");\nfs.writeFileSync(${JSON.stringify(b)}, "new\\n");\nconsole.log("replaced 1");`,
+		);
+		const text = changed.content[0]?.text ?? "";
+		expect(text).toContain("── edit-multi-a.txt ──");
+		expect(text).toContain("── edit-multi-b.txt (created) ──");
+		expect(text).toContain("stdout:\nreplaced 1");
+		expect(text.indexOf("stdout:")).toBeLessThan(
+			text.indexOf("── edit-multi-a.txt"),
+		);
+
+		const noop = await run(`console.log("0 matches for foo");`);
+		expect(noop.content[0]?.text).toContain("no declared file changed");
+		expect(noop.content[0]?.text).toContain("0 matches for foo");
 	});
 
 	test("edit execute: stray structured field is a hard error naming the fix", async () => {

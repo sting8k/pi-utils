@@ -51,9 +51,10 @@ export function formatContexts(
 		.join("\n---\n");
 }
 
-export function formatDiffs(diffs: EditDiff[]): string {
+/** Render hunks under a `── title ──` header (the file path for edit results). */
+export function formatDiffs(diffs: EditDiff[], title = "diff"): string {
 	if (diffs.length === 0) return "";
-	const chunks: string[] = ["── diff ──"];
+	const chunks: string[] = [`── ${title} ──`];
 
 	for (const diff of diffs) {
 		// Headers use post-edit (new-file) coordinates.
