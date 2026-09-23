@@ -584,11 +584,12 @@ export default function shellBackground(pi: ExtensionAPI) {
 				"still running after 30s auto-move to the background in interactive sessions — the tool returns " +
 				"a job id and the result is delivered into the conversation when it finishes. Pass " +
 				"background:true to start detached immediately; timeout:N (seconds) kills the whole process " +
-				"tree. Manage jobs with shell_status / shell_kill.",
+				"tree; shell_kill stops a job.",
 			promptSnippet:
-				"Run bash; long or background:true commands return a job id (collect via shell_status)",
+				"Run bash; long or background:true commands return a job id and wake you with the result",
 			promptGuidelines: [
-				"Use bash normally for quick commands; for long-running ones (builds, dev servers) pass background:true and collect with shell_status.",
+				"Use bash normally for quick commands; for long-running ones (builds, dev servers) pass background:true.",
+				"A background job's result wakes you when it finishes: with no independent work left, end your turn — never wait for it with sleep or shell_status.",
 			],
 			parameters: Type.Object({
 				command: Type.String({ description: "Bash command to execute" }),
@@ -601,7 +602,7 @@ export default function shellBackground(pi: ExtensionAPI) {
 				background: Type.Optional(
 					Type.Boolean({
 						description:
-							"Launch detached in the background; returns a job id immediately (result delivered when done; use shell_status to poll)",
+							"Launch detached in the background; returns a job id immediately and wakes you with the result when done (don't wait for it)",
 					}),
 				),
 			}),
@@ -619,11 +620,12 @@ export default function shellBackground(pi: ExtensionAPI) {
 			name: "shell_status",
 			label: "Shell status",
 			description:
-				"Check a background shell job: with id, returns its status and output so far (or its final " +
-				"result once finished); without id, lists job counts for the session plus the newest rows, " +
-				"running jobs first.",
+				"Inspect background shell jobs — not for waiting: finished results wake you on their own. " +
+				"With id, returns its status and output so far (or its final result once finished); without " +
+				"id, lists job counts for the session plus the newest rows, running jobs first. Use it for an " +
+				"explicit peek, a job that looks stuck, or when a job message says the run is headless.",
 			promptSnippet:
-				"Poll or collect background bash jobs; no id lists the newest",
+				"Inspect or list background bash jobs — not for waiting (results wake you)",
 			parameters: Type.Object({
 				id: Type.Optional(
 					Type.String({

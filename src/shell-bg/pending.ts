@@ -57,9 +57,8 @@ export function backgroundedResult(
 	const line = `  $ ${clip(input.command)}`;
 	const tail = input.interactive
 		? [
-				"The result is pushed here on completion — no need to poll",
-				`(${input.collectWith}). Carry on; ${input.collectWith} id "${input.id}" = early`,
-				`result, ${input.collectWith} with no id = list jobs.`,
+				"Do other independent work if you have any; otherwise END YOUR TURN now.",
+				"The result wakes you when it finishes — don't sleep or check on it.",
 			]
 		: [
 				"Headless run: nothing is delivered after this turn. Re-call",
@@ -105,7 +104,6 @@ export function deliveryMessage(jobs: DeliveredJob[]): string {
 		...blocks,
 		"",
 		intro,
-		"Background results wake you on completion — no need to poll (shell_status).",
 		"Fold into your work; if you had moved on, say whether it changes anything.",
 	].join("\n");
 }

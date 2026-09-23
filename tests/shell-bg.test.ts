@@ -159,7 +159,7 @@ describe("pending messages", () => {
 		delivered: false,
 	};
 
-	test("auto-background message states the elapsed time and collect tool", () => {
+	test("auto-background message states the elapsed time and says to end the turn", () => {
 		const r = backgroundedResult({
 			id: "bg-1",
 			command: "npm run build",
@@ -169,8 +169,8 @@ describe("pending messages", () => {
 			collectWith: "shell_status",
 		});
 		expect(r.text).toContain("still running after 45s");
-		expect(r.text).toContain("no need to poll");
-		expect(r.text).toContain("(shell_status)");
+		expect(r.text).toContain("END YOUR TURN");
+		expect(r.text).not.toContain("shell_status");
 		expect(r.details.pollRequired).toBe(false);
 	});
 
@@ -191,7 +191,7 @@ describe("pending messages", () => {
 		const m = deliveryMessage([{ id: "bg-1", body: "exit 0\nok" }]);
 		expect(m).toContain('<shell_bg_result id="bg-1">');
 		expect(m).toContain("bg-1 — background job finished, result above.");
-		expect(m).toContain("no need to poll (shell_status)");
+		expect(m).not.toContain("shell_status");
 		expect(DELIVERY_TYPE).toBe("pi-utils-shell-bg-result");
 	});
 
