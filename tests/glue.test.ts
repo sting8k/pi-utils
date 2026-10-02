@@ -158,72 +158,6 @@ async function startSession(
 	}
 }
 
-describe("fs-search glue", () => {
-	test("default scaffold leaves standalone search tools off (opt-in)", async () => {
-		// Fresh agentDir (no file) -> scaffold writes DEFAULT_SETTINGS,
-		// which ships grep/glob in disabledTools: nothing registers.
-		const tmp = join(root, "fresh-agent");
-		mkdirSync(tmp, { recursive: true });
-		const prev = process.env.PI_CODING_AGENT_DIR;
-		process.env.PI_CODING_AGENT_DIR = tmp;
-		const { api, captured } = fakePi();
-		const mod = await import("../extensions/fs-search.ts");
-		mod.default(api);
-		expect(captured.tools).toEqual([]);
-		process.env.PI_CODING_AGENT_DIR = prev;
-	});
-
-	test("registers grep and glob with prompt snippets", async () => {
-		const { api, captured } = fakePi();
-		const mod = await import("../extensions/fs-search.ts");
-		mod.default(api);
-		expect(captured.tools.map((t) => t.name).sort()).toEqual(["glob", "grep"]);
-		for (const tool of captured.tools) {
-			expect(tool.description).toBeTruthy();
-			expect(tool.promptSnippet).toBeTruthy();
-			expect(tool.parameters).toBeTruthy();
-		}
-	});
-
-	test("glob execute returns mtime-sorted paths, including gitignored", async () => {
-		const { api, captured } = fakePi();
-		const mod = await import("../extensions/fs-search.ts");
-		mod.default(api);
-		await startSession(captured, fakeCtx(root));
-		const glob = captured.tools.find((t) => t.name === "glob");
-		if (!glob) throw new Error("glob tool missing");
-		const result = (await glob.execute(
-			"t1",
-			{ pattern: "*.md" },
-			undefined,
-			undefined,
-			fakeCtx(root),
-		)) as {
-			content: Array<{ type: string; text: string }>;
-		};
-		expect(result.content[0]?.text).toContain("readme.md");
-	});
-
-	test("grep execute finds matches with line numbers", async () => {
-		const { api, captured } = fakePi();
-		const mod = await import("../extensions/fs-search.ts");
-		mod.default(api);
-		await startSession(captured, fakeCtx(root));
-		const grep = captured.tools.find((t) => t.name === "grep");
-		if (!grep) throw new Error("grep tool missing");
-		const result = (await grep.execute(
-			"t2",
-			{ pattern: "keyword-glue" },
-			undefined,
-			undefined,
-			fakeCtx(root),
-		)) as {
-			content: Array<{ type: string; text: string }>;
-		};
-		expect(result.content[0]?.text).toContain("readme.md:2: keyword-glue here");
-	});
-});
-
 describe("shell-bg glue", () => {
 	test("registers bash (override), shell_status, shell_kill, /shell-bg", async () => {
 		const { api, captured } = fakePi();
@@ -529,18 +463,6 @@ describe("shell-bg glue", () => {
 });
 
 describe("disabledTools glue (US-002)", () => {
-	test("grep disabled → grep not registered, glob still is", async () => {
-		writeFileSync(
-			join(agentDir, "pi-utils.json"),
-			JSON.stringify({ disabledTools: ["grep"] }),
-		);
-		const { api, captured } = fakePi();
-		const mod = await import("../extensions/fs-search.ts");
-		mod.default(api);
-		await startSession(captured, fakeCtx(root));
-		expect(captured.tools.map((t) => t.name)).toEqual(["glob"]);
-	});
-
 	test("bash disabled → bash/status/kill not registered, widget not wired", async () => {
 		writeFileSync(
 			join(agentDir, "pi-utils.json"),

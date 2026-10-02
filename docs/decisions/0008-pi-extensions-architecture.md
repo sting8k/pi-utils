@@ -4,7 +4,8 @@ Date: 2026-09-14
 
 ## Status
 
-Accepted
+Accepted — the standalone `grep` / `glob` tools are retired by
+[0014](0014-retire-search-tools-skills-on.md); the search cores remain for bash routing.
 
 ## Context
 

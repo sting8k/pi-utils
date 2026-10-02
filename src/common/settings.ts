@@ -76,14 +76,19 @@ export interface PiUtilsSettings {
 
 /** Every tool pi-utils can register — single source of truth for disabledTools. */
 export const KNOWN_TOOLS = [
-	"grep",
-	"glob",
 	"bash",
 	"shell_status",
 	"shell_kill",
 	"edit",
 	"skill_write",
 ] as const;
+
+/**
+ * Tool names pi-utils no longer registers (decision 0014: standalone grep/glob
+ * tools retired). Existing settings files still list them — they are
+ * dropped silently instead of warning on every session start.
+ */
+const RETIRED_TOOLS: readonly string[] = ["grep", "glob"];
 
 export const DEFAULT_SETTINGS: PiUtilsSettings = {
 	fsSearch: {
@@ -114,13 +119,9 @@ export const DEFAULT_SETTINGS: PiUtilsSettings = {
 		// in v1. 0 = off.
 		nudgeInterval: 10,
 	},
-	// Owner preference (2026-09-15): standalone search tools ship OFF by
-	// default — the bash router (US-001) already runs rg/grep/glob-style
-	// commands through the same fs-search cores, so one surface suffices.
-	// Set [] to opt back into the dedicated grep/glob tools.
-	// US-004: skill_write also ships OFF — the skills layer is opt-in;
-	// removing the entry enables tool + index transform + nudge together.
-	disabledTools: ["grep", "glob", "skill_write"],
+	// Decision 0014: every tool ships ON, skill_write included (tool + index
+	// transform + nudge); list names here to skip them.
+	disabledTools: [],
 };
 
 export interface SettingsLoadResult {
@@ -362,6 +363,7 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 					}
 					continue;
 				}
+				if (RETIRED_TOOLS.includes(entry)) continue;
 				if (!(KNOWN_TOOLS as readonly string[]).includes(entry)) {
 					dropped.push(JSON.stringify(entry));
 					continue;

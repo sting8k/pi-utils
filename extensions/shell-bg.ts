@@ -44,6 +44,7 @@ import {
 	loadSettings,
 	type PiUtilsSettings,
 } from "../src/common/settings.ts";
+import { cleanupSpills } from "../src/common/tempfile.ts";
 import {
 	matchBashSearch,
 	type RoutedSearch,
@@ -222,9 +223,17 @@ export default function shellBackground(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		const loaded = loadSettings(getAgentDir());
 		settings = loaded.settings;
+		if (loaded.created) {
+			ctx.ui.notify(
+				`pi-utils: settings scaffolded at ${getAgentDir()}/pi-utils.json`,
+				"info",
+			);
+		}
 		for (const warning of loaded.warnings) {
 			ctx.ui.notify(`pi-utils shell-bg: ${warning}`, "warning");
 		}
+		// Routed bash searches spill full output to temp files; sweep old ones.
+		cleanupSpills();
 		// Session-scoped registry dir (decision 0013): the session id keeps
 		// concurrent sessions in the same cwd from sharing jobs/logs/deliveries;
 		// stale sibling dirs from dead sessions are swept opportunistically.

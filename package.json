@@ -1,7 +1,7 @@
 {
 	"name": "@sting8k/pi-utils",
-	"version": "0.6.0",
-	"description": "Utility extensions for the Pi coding agent: deep fs-search (grep/glob), background shell (shell-bg), script-mode edit, and the skills write layer (skill_write)",
+	"version": "0.7.0",
+	"description": "Utility extensions for the Pi coding agent: background shell (shell-bg) with bash search routing, script-mode edit, and the skills write layer (skill_write)",
 	"type": "module",
 	"license": "MIT",
 	"keywords": [
@@ -14,14 +14,14 @@
 		"test": "bun test"
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": ">=0.80.0 <1.0.0",
+		"@earendil-works/pi-coding-agent": ">=0.80.0 <2.0.0",
 		"@sting8k/pi-droid-styling": ">=2.13.0",
 		"typebox": ">=1.1.24 <2.0.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.10",
-		"@earendil-works/pi-coding-agent": "^0.85.1",
-		"@earendil-works/pi-tui": "0.85.1",
+		"@earendil-works/pi-coding-agent": "^1.0.0",
+		"@earendil-works/pi-tui": "1.0.0",
 		"@sting8k/pi-droid-styling": "file:../pi-droid-styling",
 		"@types/bun": "^1.4.2",
 		"@types/node": "^20.0.0",
@@ -30,7 +30,6 @@
 	},
 	"pi": {
 		"extensions": [
-			"./extensions/fs-search.ts",
 			"./extensions/shell-bg.ts",
 			"./extensions/edit.ts",
 			"./extensions/skill-write.ts"

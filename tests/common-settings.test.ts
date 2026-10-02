@@ -143,11 +143,11 @@ describe("loadSettings — disabledTools (US-002)", () => {
 			JSON.stringify({
 				fsSearch: {},
 				shellBg: {},
-				disabledTools: ["grep", "glob", "grep"],
+				disabledTools: ["bash", "edit", "bash"],
 			}),
 		);
 		const result = loadSettings(dir);
-		expect(result.settings.disabledTools).toEqual(["grep", "glob"]);
+		expect(result.settings.disabledTools).toEqual(["bash", "edit"]);
 		expect(result.warnings).toEqual([]);
 	});
 
@@ -158,11 +158,7 @@ describe("loadSettings — disabledTools (US-002)", () => {
 			JSON.stringify({ fsSearch: {}, shellBg: {} }),
 		);
 		const result = loadSettings(dir);
-		expect(result.settings.disabledTools).toEqual([
-			"grep",
-			"glob",
-			"skill_write",
-		]);
+		expect(result.settings.disabledTools).toEqual([]);
 		expect(result.warnings).toEqual([]);
 	});
 
@@ -172,11 +168,7 @@ describe("loadSettings — disabledTools (US-002)", () => {
 			JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: "grep" }),
 		);
 		const result = loadSettings(dir);
-		expect(result.settings.disabledTools).toEqual([
-			"grep",
-			"glob",
-			"skill_write",
-		]);
+		expect(result.settings.disabledTools).toEqual([]);
 		expect(
 			result.warnings.some((w) => w.includes('"disabledTools" invalid')),
 		).toBe(true);
@@ -188,13 +180,23 @@ describe("loadSettings — disabledTools (US-002)", () => {
 			JSON.stringify({
 				fsSearch: {},
 				shellBg: {},
-				disabledTools: ["grpe", "glob", 42],
+				disabledTools: ["grpe", "edit", 42],
 			}),
 		);
 		const result = loadSettings(dir);
-		expect(result.settings.disabledTools).toEqual(["glob"]);
+		expect(result.settings.disabledTools).toEqual(["edit"]);
 		expect(result.warnings.some((w) => w.includes('"grpe"'))).toBe(true);
 		expect(result.warnings.some((w) => w.includes("42"))).toBe(true);
+	});
+
+	test("retired grep/glob entries drop silently (decision 0014)", () => {
+		writeFileSync(
+			settingsFilePath(dir),
+			JSON.stringify({ disabledTools: ["glob", "grep", "skill_write"] }),
+		);
+		const result = loadSettings(dir);
+		expect(result.settings.disabledTools).toEqual(["skill_write"]);
+		expect(result.warnings).toEqual([]);
 	});
 
 	test("trailing-* wildcard expands to matching KNOWN_TOOLS", () => {
@@ -271,11 +273,7 @@ describe("loadSettings — repair pass (owner decision 2026-09-15)", () => {
 		expect(result.created).toBe(false);
 		expect(result.settings.bashRouter.unwrapPrefixes).toEqual(["rtk"]);
 		expect(result.settings.edit).toEqual({ lang: "python", timeoutSec: 10 });
-		expect(result.settings.disabledTools).toEqual([
-			"grep",
-			"glob",
-			"skill_write",
-		]);
+		expect(result.settings.disabledTools).toEqual([]);
 		// Custom values survive verbatim.
 		expect(result.settings.fsSearch.globMaxResults).toBe(42);
 		expect(result.settings.shellBg.autoBackgroundMs).toBe(45_000);

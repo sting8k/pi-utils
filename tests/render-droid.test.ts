@@ -16,7 +16,6 @@ import {
 	loadDroidRenderers,
 	resetDroidRenderersForTests,
 } from "../src/render/droid.ts";
-import { grepMatchCount } from "../src/render/tool-renderers.ts";
 
 const STUB = resolve(import.meta.dir, "fixtures/droid-stub.ts");
 
@@ -59,15 +58,6 @@ describe("loadDroidRenderers", () => {
 			rmSync(dir, { recursive: true, force: true });
 			resetDroidRenderersForTests();
 		}
-	});
-});
-
-describe("grepMatchCount", () => {
-	test("counts path:line: rows only", () => {
-		expect(grepMatchCount("No matches found.")).toBe(0);
-		expect(
-			grepMatchCount("3 matches in 2 files\na.ts:1: x\na.ts:2: y\nb.md:9: z"),
-		).toBe(3);
 	});
 });
 
@@ -119,8 +109,6 @@ describe("extension re-registration with droid renderers", () => {
 	beforeAll(() => {
 		agentDir = mkdtempSync(join(tmpdir(), "pi-utils-agentdir-"));
 		process.env.PI_CODING_AGENT_DIR = agentDir;
-		// Explicit enabled-search baseline: DEFAULT now ships grep/glob
-		// disabled (owner preference) — this suite asserts on grep rendering.
 		writeFileSync(
 			join(agentDir, "pi-utils.json"),
 			JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: [] }),
@@ -138,62 +126,13 @@ describe("extension re-registration with droid renderers", () => {
 		resetDroidRenderersForTests();
 	});
 
-	test("tools register without renderers at load, re-register with them after session_start", async () => {
-		const { api, tools, handlers } = fakePi();
-		const mod = await import("../extensions/fs-search.ts");
-		mod.default(api);
-
-		const atLoad = tools.filter((t) => t.name === "grep");
-		expect(atLoad.length).toBe(1);
-		expect(atLoad[0]?.renderCall).toBeUndefined();
-
-		for (const handler of handlers.get("session_start") ?? []) {
-			await handler(
-				{ type: "session_start", reason: "startup" },
-				fakeCtx(root),
-			);
-		}
-
-		const greps = tools.filter((t) => t.name === "grep");
-		expect(greps.length).toBe(2); // load + droid re-registration
-		const withRender = greps.at(-1);
-		expect(typeof withRender?.renderCall).toBe("function");
-		expect(typeof withRender?.renderResult).toBe("function");
-
-		const component = asRenderer(withRender?.renderCall)(
-			{ pattern: "hello" },
-			{},
-			{ state: {} },
-		);
-		const lines = component.render(80);
-		expect(lines[0]).toContain("[call Search]");
-		expect(lines[0]).toContain("/hello/ in current directory");
-
-		// Expanded result renders the metrics footer line (elapsed from details).
-		const resultComponent = asRenderer(withRender?.renderResult)(
-			{
-				content: [
-					{
-						type: "text",
-						text: "1 matches in 1 files\na.md:1: hello render-test",
-					},
-				],
-				details: { __elapsedMs: 1500 },
-			},
-			{ expanded: true },
-			{},
-			{ state: {}, args: { pattern: "hello" } },
-		);
-		const resultLines = resultComponent.render(80);
-		expect(resultLines[0]).toBe("[result ok]");
-		expect(resultLines.join("\n")).toContain("↳ Found 1 match.");
-		expect(resultLines.join("\n")).toContain("◷ 1.50s");
-	});
-
 	test("shell-bg bash gets droid renderers after session_start", async () => {
 		const { api, tools, handlers } = fakePi();
 		const mod = await import("../extensions/shell-bg.ts");
 		mod.default(api);
+		const atLoad = tools.filter((t) => t.name === "bash");
+		expect(atLoad.length).toBe(1);
+		expect(atLoad[0]?.renderCall).toBeUndefined();
 		for (const handler of handlers.get("session_start") ?? []) {
 			await handler(
 				{ type: "session_start", reason: "startup" },
