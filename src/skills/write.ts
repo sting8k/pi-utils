@@ -19,7 +19,9 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { snapshotPaths } from "../edit/snapshot.ts";
 import {
 	SKILL_NAME_MAX,
@@ -320,13 +322,24 @@ export function deleteSkill(skillDirectory: string): OpResult {
  * Resolve a read-tool path to a SKILL.md under skillsRoot — null when the
  * path is not a SKILL.md or lies outside the root (the seen-map keys on
  * these; the guard and the index "recently-used" check share it).
+ *
+ * Mirrors pi's read-tool resolution (utils/paths.js resolvePath: unicode
+ * spaces → " ", strip leading "@", expand "~", file:// URLs, then
+ * path.resolve) — any path read() accepts must mark the same key the
+ * guard later checks with resolve(), or a real read is rejected as unread.
  */
 export function resolveSkillMdPath(
 	path: string,
 	skillsRoot: string,
 	cwd: string,
+	homeDir: string = homedir(),
 ): string | null {
-	const absolute = isAbsolute(path) ? path : join(cwd, path);
+	let input = path.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
+	if (input.startsWith("@")) input = input.slice(1);
+	if (input === "~") input = homeDir;
+	else if (input.startsWith("~/")) input = join(homeDir, input.slice(2));
+	else if (input.startsWith("file://")) input = fileURLToPath(input);
+	const absolute = isAbsolute(input) ? resolve(input) : resolve(cwd, input);
 	if (absolute.split("/").pop() !== SKILL_MD) return null;
 	const rel = relative(skillsRoot, absolute);
 	if (rel.length === 0 || rel.startsWith("..")) return null;

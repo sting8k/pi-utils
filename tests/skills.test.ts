@@ -8,7 +8,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { loadSettings } from "../src/common/settings.ts";
 import {
 	parseFrontmatterLenient,
@@ -225,6 +225,19 @@ describe("read-before-write guard data (seen-map + path resolve)", () => {
 		expect(
 			resolveSkillMdPath(join(root, "..", "evil", "SKILL.md"), root, root),
 		).toBeNull();
+		// Same spellings pi's read() accepts must mark the same resolved key.
+		expect(resolveSkillMdPath(`@${skillMd}`, root, "/x")).toBe(skillMd);
+		expect(resolveSkillMdPath(`${root}/./alpha//${SKILL_MD}`, root, "/x")).toBe(
+			skillMd,
+		);
+		expect(
+			resolveSkillMdPath(
+				`~/${relative(dirname(root), skillMd)}`,
+				root,
+				"/x",
+				dirname(root),
+			),
+		).toBe(skillMd);
 	});
 
 	test("requires checker caches PATH hits/misses", () => {
