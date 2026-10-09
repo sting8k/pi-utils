@@ -1,6 +1,7 @@
 /**
- * US-004 — skill_write ops: create / patch / delete on SKILL.md files under
- * the native skills root. Every mutation follows the US-003 snapshot
+ * US-004/US-005 — skill_write ops: create / patch / delete / move on SKILL.md
+ * files under the native skills root (`<root>/<category>/<name>/`; root-level
+ * skills are legacy). Every mutation follows the US-003 snapshot
  * discipline: snapshot → write → verify; any failure restores the snapshot
  * and the caller gets a fixable error. `skill_write` guards SKILL.md only —
  * supporting files (references/ etc.) are generic-file-tool territory.
@@ -15,6 +16,8 @@ import {
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	renameSync,
+	rmdirSync,
 	rmSync,
 	statSync,
 	writeFileSync,
@@ -44,6 +47,120 @@ export interface SkillTarget {
 	skillsRoot: string;
 	name: string;
 	category?: string;
+	/** create/move only: allow `category` to be a directory that does not exist yet. */
+	newCategory?: boolean;
+}
+
+export interface SkillLocation {
+	dir: string;
+	skillMd: string;
+	/** undefined = legacy root-level skill. */
+	category?: string;
+}
+
+export type LocateResult =
+	| ({ ok: true } & SkillLocation)
+	| { ok: false; error: string; missing?: boolean };
+
+function isDir(path: string): boolean {
+	try {
+		return statSync(path).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+/** Category dirs = valid-named directories under the root that are not themselves skills. */
+function categoryDirs(skillsRoot: string): string[] {
+	let entries: string[];
+	try {
+		entries = readdirSync(skillsRoot).sort();
+	} catch {
+		return [];
+	}
+	return entries.filter(
+		(entry) =>
+			SKILL_NAME_RE.test(entry) &&
+			isDir(join(skillsRoot, entry)) &&
+			!existsSync(join(skillsRoot, entry, SKILL_MD)),
+	);
+}
+
+/** Categories with their skill counts, sorted by name. */
+export function listCategories(
+	skillsRoot: string,
+): Array<{ name: string; count: number }> {
+	return categoryDirs(skillsRoot).map((name) => {
+		const dir = join(skillsRoot, name);
+		const count = readdirSync(dir).filter((child) =>
+			existsSync(join(dir, child, SKILL_MD)),
+		).length;
+		return { name, count };
+	});
+}
+
+function categoryLine(skillsRoot: string): string {
+	const cats = listCategories(skillsRoot);
+	return `categories: ${cats.length > 0 ? cats.map((c) => `${c.name}(${c.count})`).join(" ") : "(none yet)"}`;
+}
+
+/** null = usable; otherwise the fixable error (create + move share it). */
+function checkCategory(target: SkillTarget): string | null {
+	const { skillsRoot, category } = target;
+	if (!category) {
+		return `category is required — ${categoryLine(skillsRoot)} — pick the one matching the context this skill is used in, or pass new_category:true with a new name`;
+	}
+	if (categoryDirs(skillsRoot).includes(category)) return null;
+	if (existsSync(join(skillsRoot, category))) {
+		return `"${category}" is a skill, not a category — ${categoryLine(skillsRoot)}`;
+	}
+	if (!target.newCategory) {
+		return `category "${category}" does not exist — ${categoryLine(skillsRoot)} — pick one, or pass new_category:true to create it`;
+	}
+	return null;
+}
+
+/**
+ * Find a skill by name across the root and its category dirs. `category`
+ * narrows (and so disambiguates) but must not contradict where the skill is.
+ */
+export function locateSkill(
+	skillsRoot: string,
+	name: string,
+	category?: string,
+): LocateResult {
+	const found: SkillLocation[] = [];
+	for (const cat of [undefined, ...categoryDirs(skillsRoot)]) {
+		const dir = join(skillsRoot, ...(cat ? [cat] : []), name);
+		const skillMd = join(dir, SKILL_MD);
+		if (existsSync(skillMd)) found.push({ dir, skillMd, category: cat });
+	}
+	if (found.length === 0) {
+		return {
+			ok: false,
+			error: `no skill named "${name}" under ${skillsRoot} — create it with action:"create"`,
+			missing: true,
+		};
+	}
+	const where = (locs: SkillLocation[]) =>
+		locs.map((loc) => loc.skillMd).join(", ");
+	const candidates =
+		category === undefined
+			? found
+			: found.filter((loc) => loc.category === category);
+	if (candidates.length === 0) {
+		return {
+			ok: false,
+			error: `skill "${name}" is not in category "${category}" — it lives at ${where(found)}`,
+		};
+	}
+	if (candidates.length > 1) {
+		return {
+			ok: false,
+			error: `skill name "${name}" is ambiguous — found at ${where(candidates)}; pass category to pick one`,
+		};
+	}
+	return { ok: true, ...(candidates[0] as SkillLocation) };
 }
 
 /** Validate a skill name (all ops) / category (create) at the funnel. */
@@ -89,9 +206,9 @@ function restoreSnapshot(
 	return failed;
 }
 
-/** create: `<skillsRoot>/[<category>/]<name>/SKILL.md`. Exists → error naming patch. */
+/** create: `<skillsRoot>/<category>/<name>/SKILL.md`. Exists anywhere → error naming patch. */
 export function createSkill(target: SkillTarget, content: string): OpResult {
-	const targetError = validateTarget(target);
+	const targetError = validateTarget(target) ?? checkCategory(target);
 	if (targetError) return { ok: false, error: targetError, rolledBack: false };
 
 	const validation = validateCreate(content, target.category);
@@ -105,10 +222,12 @@ export function createSkill(target: SkillTarget, content: string): OpResult {
 
 	const dir = skillDir(target);
 	const path = join(dir, SKILL_MD);
-	if (existsSync(path)) {
+	// Names are unique across the root (patch/delete/move locate by name).
+	const existing = locateSkill(target.skillsRoot, target.name);
+	if (existing.ok || !existing.missing) {
 		return {
 			ok: false,
-			error: `skill already exists at ${path} — use action:"patch" to modify it`,
+			error: `skill already exists${existing.ok ? ` at ${existing.skillMd}` : ` (${existing.error})`} — use action:"patch" to modify it`,
 			rolledBack: false,
 		};
 	}
@@ -312,6 +431,66 @@ export function deleteSkill(skillDirectory: string): OpResult {
 		return {
 			ok: false,
 			error: `delete failed (${message})${failed.length > 0 ? ` — RESTORE FAILED for ${failed.join(", ")}` : " — rolled back"}`,
+			rolledBack: true,
+			restoreFailures: failed.length > 0 ? failed : undefined,
+		};
+	}
+}
+
+/**
+ * move: relocate a located skill dir into `target.category` (rename — atomic
+ * on one filesystem; a symlinked skill moves as the symlink). Snapshot of the
+ * skill's files taken first; any failure puts everything back and removes a
+ * category dir this call created.
+ */
+export function moveSkill(from: SkillLocation, target: SkillTarget): OpResult {
+	const targetError = validateTarget(target) ?? checkCategory(target);
+	if (targetError) return { ok: false, error: targetError, rolledBack: false };
+	if (from.category === target.category) {
+		return {
+			ok: false,
+			error: `skill "${target.name}" is already in category "${target.category}"`,
+			rolledBack: false,
+		};
+	}
+	const dest = skillDir(target);
+	if (existsSync(dest)) {
+		return {
+			ok: false,
+			error: `${dest} already exists — cannot move onto it`,
+			rolledBack: false,
+		};
+	}
+
+	const categoryDir = dirname(dest);
+	const createdCategory = !existsSync(categoryDir);
+	const snapshot = snapshotPaths(listFiles(from.dir));
+	try {
+		mkdirSync(categoryDir, { recursive: true });
+		renameSync(from.dir, dest);
+		if (!existsSync(join(dest, SKILL_MD)) || existsSync(from.dir)) {
+			throw new Error("move did not land as expected");
+		}
+		return { ok: true, path: join(dest, SKILL_MD), warnings: [] };
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		const failed: string[] = [];
+		try {
+			if (existsSync(dest) && !existsSync(from.dir)) renameSync(dest, from.dir);
+		} catch {
+			failed.push(dest);
+		}
+		failed.push(...restoreSnapshot(snapshot.entries));
+		if (createdCategory) {
+			try {
+				rmdirSync(categoryDir); // only succeeds when empty
+			} catch {
+				// leave a non-empty dir alone
+			}
+		}
+		return {
+			ok: false,
+			error: `move failed (${message})${failed.length > 0 ? ` — RESTORE FAILED for ${failed.join(", ")}` : " — rolled back"}`,
 			rolledBack: true,
 			restoreFailures: failed.length > 0 ? failed : undefined,
 		};

@@ -8,6 +8,12 @@ create/guard/patch-diff/delete round-trip; nudge fire-once x3
 independent sessions). Emit-format delta (group-by-root, collision
 location) approved post-smoke — landing as follow-up.
 
+Index contract changed by US-005 (2026-10-09): the pipeline's
+steps 5–7 (over-limit demotion, recently-used re-expansion, overlap
+flags, `# not shown in full` tail) are replaced by the two-tier
+session-stable catalog — see "Smart index transform" below and
+US-005 for the contract.
+
 Follow-up 2026-09-18 (bean-approved): `dirs:` visibility condition —
 see "Pipeline per entry" step 3 + acceptance. Owner: Peanut
 implements, Dario integrates/verifies, no push before bean.
@@ -90,14 +96,16 @@ write approval, security scan, hub/sync, batch `write_file` ops,
 ### `skill_write`
 
 ```ts
-{ name, action: "create"|"patch"|"delete",
-  category?, content?, old_string?, new_string?, replace_all? }
+{ name, action: "create"|"patch"|"delete"|"move",
+  category?, new_category?, content?, old_string?, new_string?, replace_all? }
 ```
 
 Single-op flat shape (batch ops deferred — script-`edit` covers
 atomic multi-file if ever needed).
 
-- `create`: write `<skills_root>/[<category>/]<name>/SKILL.md`.
+- `create`: write `<skills_root>/<category>/<name>/SKILL.md`
+  (`category` required, `new_category`, name-unique across categories,
+  patch/delete/move locate by name — US-005).
   Exists → error naming `patch`. Parent dirs auto-created.
 - `patch`: `old_string`→`new_string` on SKILL.md — same fuzzy-match
   semantics as our `patch` tool; `replace_all` optional.
@@ -126,7 +134,7 @@ error message names the way out.
   parses to a mapping; body non-empty
 - `name` + `description` present; `name` `^[a-z0-9][a-z0-9_-]*$`,
   ≤64 chars
-- `category` if present: single dir name, same regex, no `/` `\`
+- `category`: single dir name, same regex, no `/` `\`
 - `description` >60 chars → **advisory warning** (not rejection):
   response includes `warning` + `index_preview` showing the exact
   rendered index line. (Native renders full descs — length is a
@@ -173,19 +181,19 @@ per-result spam.
 ONE handler does transform + rules-block append in a single
 return (no chained double-return). Re-emit keeps the native tag
 name `<available_skills>` so the rules block and any tooling
-keyed on it stay coherent.
+keyed on it stay coherent. (US-005: the transform runs ONCE per
+session and the result is reused verbatim every turn — the system
+prompt never changes mid-session.)
 
 Locate `<available_skills>…</available_skills>` in
 `event.systemPrompt`; parse entries per category; apply pipeline;
 re-emit in our own format and splice back. Parse failure or missing
 block → return unchanged (worst case = native).
 
-Emit format: entries **grouped by root dir** — one `# <abs root>`
-header per group, entries carry only `name` + inline `description`.
-Per-entry `location=` is emitted ONLY when the same `name` exists
-under two different roots (native collision case — the attr then
-disambiguates). Repeating a 40-char root prefix on every entry is
-pure prompt waste.
+Emit format: see step 7 (US-005 supersedes the original
+one-entry-per-skill, group-by-root rendering). Per-entry `location=`
+is emitted ONLY when the same `name` exists under two different roots
+(native collision case — the attr then disambiguates).
 
 Pipeline per entry:
 
@@ -207,19 +215,22 @@ Pipeline per entry:
    repos or ones you don't want committed.
 4. `disable-model-invocation` → hidden (slash-only contract — same
    as native)
-5. count > `skills.index_full_limit` (default 50) → categories
-   without recently-used skills collapse to names-only.
-   "Recently-used" = SKILL.md read this session via our read
-   tracking (same seen-map as the write guard) — session-scoped,
-   no persistence in v1
-6. quality flags: `⚠ missing description`, `⚠ possible overlap a≈b`
-   (same category + near-identical desc prefix)
-7. tail section when anything hidden/demoted — blank line, then a
-   `# not shown in full` header (same style as the root headers), the
-   `<collapsed category=…>` lines, and — only if something was hidden —
+5. *(removed by US-005)* over-limit demotion with a recently-used
+   re-expansion. Re-expanding a category after a read changed the
+   system prompt mid-session (prompt-cache bust, +~10k tok for a big
+   bucket). `skills.index_full_limit` is gone; user files that still
+   carry it are ignored silently.
+6. malformed frontmatter → `⚠` (kept; costs nothing when absent).
+   `missing description` / `possible overlap` flags were dropped —
+   they cost tokens per occurrence and only help skill authors.
+7. emit (US-005): `core` group (most-used skills, short desc), one
+   `<category>` names-only line per category under the skills root,
+   per-root groups for skills outside it (project / contributed,
+   `location=` only on a cross-root name collision), and — only if
+   something was hidden — a blank line, `# hidden`, and
    `N hidden by platforms/requires/dirs — ls <skillsRoot> or
-   /skill:<name>`. Own section so neither line reads as an entry of
-   the last root group (a fresh reader mis-attributed the pointer's
+   /skill:<name>`. Own section so the pointer never reads as an entry
+   of the group above (a fresh reader mis-attributed the pointer's
    path to the `~/.agents/skills` header above it, 2026-09-18).
 
 Data sources are split on purpose: **which skills exist** comes from
@@ -260,7 +271,8 @@ defaults).
   `extensions/edit.ts`: registry, schema, `droidToolRender`)
 - new: `src/skills/` — frontmatter parse, guard tracking, write ops
 - touch: `src/common/settings.ts` — `skills.index` (smart|native),
-  `skills.index_full_limit`, `skills.nudge_interval`
+  `skills.coreLimit`/`skills.hint` (US-005),
+  `skills.nudge_interval`
   (skills_root fixed to native default)
 - read-tracking hook: whatever Pi exposes for tool-call events
   (ReadToolCallEvent per Peanut) — confirm exact API at impl time
@@ -287,16 +299,15 @@ defaults).
   message; failed multi-step → rolled back
 - nudge on by default (interval 10); interval=3 fires after 3 iters; 0 = silent
 - `skills.index=native` → prompt block byte-identical to native
-- smart mode: root prefix appears once per group header; a name
-  existing under two roots keeps `location=` on those entries only
+- smart mode: a name existing under two roots keeps `location=` on
+  the outside-root entry only
 - `disabledTools: ["skill*"]` → tool hidden AND prompt untouched
   (native index as-is, no rules block) AND no nudge lines
 - fresh scaffold `pi-utils.json` already contains `"skill_write"` in
   `disabledTools` — layer inert until the user removes the line
 - smart mode: skill with `platforms:[windows]` on macOS absent;
-  `requires:[bogus-bin]` absent; >limit → names-only demotion +
-  pointer; malformed frontmatter → `⚠` flag; unparseable native
-  block → passthrough
+  `requires:[bogus-bin]` absent; hidden → pointer; malformed
+  frontmatter → `⚠` flag; unparseable native block → passthrough
 - smart mode `dirs`: cwd `/a/pi-agent-ext/pi-utilities` — `dirs:
   [pi-utilities]` shown, `dirs: [pi-agent-ext]` shown (ancestor
   segment), `dirs: other-repo` (scalar) hidden + counted in the

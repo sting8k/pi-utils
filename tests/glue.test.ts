@@ -7,6 +7,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
@@ -676,7 +677,9 @@ describe("skill_write glue (US-004)", () => {
 			{ type: "before_agent_start", prompt: "", systemPrompt: native },
 			fakeCtx(root),
 		)) as { systemPrompt: string };
-		expect(result.systemPrompt).toContain('<skill name="glue-skill"');
+		expect(result.systemPrompt).toContain(
+			'<category name="uncategorized">glue-skill',
+		);
 		expect(result.systemPrompt).toContain("## Skills"); // rules block appended
 
 		// native mode: block passthrough byte-identical, rules still appended.
@@ -711,6 +714,8 @@ describe("skill_write glue (US-004)", () => {
 			{
 				name: "guard-skill",
 				action: "create",
+				category: "glue-cat",
+				new_category: true,
 				content: SKILL_CONTENT("guard-skill"),
 			},
 			undefined,
@@ -720,7 +725,10 @@ describe("skill_write glue (US-004)", () => {
 		expect(created.isError).toBeUndefined();
 		expect(created.content[0]?.text).toContain("skill created:");
 		expect(
-			readFileSync(join(agentDir, "skills", "guard-skill", "SKILL.md"), "utf8"),
+			readFileSync(
+				join(agentDir, "skills", "glue-cat", "guard-skill", "SKILL.md"),
+				"utf8",
+			),
 		).toContain("Rules with why.");
 
 		const refused = (await skillWrite.execute(
@@ -741,7 +749,13 @@ describe("skill_write glue (US-004)", () => {
 		// Read via the extension's own tool_call/tool_result handlers → seen.
 		const callHandlers = captured.handlers.get("tool_call") ?? [];
 		const resultHandlers = captured.handlers.get("tool_result") ?? [];
-		const skillMd = join(agentDir, "skills", "guard-skill", "SKILL.md");
+		const skillMd = join(
+			agentDir,
+			"skills",
+			"glue-cat",
+			"guard-skill",
+			"SKILL.md",
+		);
 		for (const handler of callHandlers) {
 			await handler(
 				{
@@ -800,7 +814,13 @@ describe("skill_write glue (US-004)", () => {
 		// No collision: group header + bare entry, no location attr.
 		const created = (await skillWrite.execute(
 			"pv1",
-			{ name: "preview-skill", action: "create", content },
+			{
+				name: "preview-skill",
+				action: "create",
+				category: "glue-cat",
+				new_category: true,
+				content,
+			},
 			undefined,
 			undefined,
 			fakeCtx(root),
@@ -815,7 +835,13 @@ describe("skill_write glue (US-004)", () => {
 		// Same-root dup → error naming patch (unchanged behavior).
 		const dup = (await skillWrite.execute(
 			"pv2",
-			{ name: "preview-skill", action: "create", content },
+			{
+				name: "preview-skill",
+				action: "create",
+				category: "glue-cat",
+				new_category: true,
+				content,
+			},
 			undefined,
 			undefined,
 			fakeCtx(root),
@@ -834,6 +860,7 @@ describe("skill_write glue (US-004)", () => {
 			{
 				name: "twin-skill",
 				action: "create",
+				category: "glue-cat",
 				content: `---\nname: twin-skill\ndescription: ${longDesc}\n---\n\nbody\n`,
 			},
 			undefined,
@@ -842,7 +869,188 @@ describe("skill_write glue (US-004)", () => {
 		)) as { content: Array<{ type: string; text: string }>; isError?: boolean };
 		expect(withTwin.isError).toBeUndefined();
 		expect(withTwin.content[0]?.text).toContain(
-			`location="${join(agentDir, "skills", "twin-skill", "SKILL.md")}"`,
+			`location="${join(agentDir, "skills", "glue-cat", "twin-skill", "SKILL.md")}"`,
 		);
+	});
+	test("move: guard enforced, locate by name, seen entry follows the move", async () => {
+		enableSkillWrite();
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/skill-write.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const skillWrite = captured.tools.find((t) => t.name === "skill_write");
+		if (!skillWrite) throw new Error("skill_write missing");
+		type Out = { content: Array<{ text: string }>; isError?: boolean };
+		const run = (id: string, params: Record<string, unknown>) =>
+			skillWrite.execute(
+				id,
+				params,
+				undefined,
+				undefined,
+				fakeCtx(root),
+			) as Promise<Out>;
+
+		const noCategory = await run("m0", {
+			name: "mv-skill",
+			action: "create",
+			content: SKILL_CONTENT("mv-skill"),
+		});
+		expect(noCategory.isError).toBe(true);
+		expect(noCategory.content[0]?.text).toContain("categories: ");
+
+		await run("m1", {
+			name: "mv-skill",
+			action: "create",
+			category: "mv-from",
+			new_category: true,
+			content: SKILL_CONTENT("mv-skill"),
+		});
+		const before = join(agentDir, "skills", "mv-from", "mv-skill", "SKILL.md");
+		const after = join(agentDir, "skills", "mv-to", "mv-skill", "SKILL.md");
+
+		const unread = await run("m2", {
+			name: "mv-skill",
+			action: "move",
+			category: "mv-to",
+			new_category: true,
+		});
+		expect(unread.isError).toBe(true);
+		expect(unread.content[0]?.text).toMatch(/Read the skill first/);
+		expect(existsSync(before)).toBe(true);
+
+		for (const handler of captured.handlers.get("tool_call") ?? []) {
+			await handler(
+				{
+					type: "tool_call",
+					toolCallId: "r1",
+					toolName: "read",
+					input: { path: before },
+				},
+				fakeCtx(root),
+			);
+		}
+		for (const handler of captured.handlers.get("tool_result") ?? []) {
+			await handler(
+				{ type: "tool_result", toolCallId: "r1", content: [], isError: false },
+				fakeCtx(root),
+			);
+		}
+		const moved = await run("m3", {
+			name: "mv-skill",
+			action: "move",
+			category: "mv-to",
+			new_category: true,
+		});
+		expect(moved.isError).toBeUndefined();
+		expect(existsSync(before)).toBe(false);
+		expect(existsSync(after)).toBe(true);
+
+		// No re-read needed at the new location, and patch finds it by name alone.
+		const patched = await run("m4", {
+			name: "mv-skill",
+			action: "patch",
+			old_string: "why.",
+			new_string: "why, moved.",
+		});
+		expect(patched.isError).toBeUndefined();
+		expect(readFileSync(after, "utf8")).toContain("why, moved.");
+	});
+
+	test("tier 1 is byte-stable after reads; usage → next session's core; hint once per skill; hint toggle", async () => {
+		const usageFile = join(agentDir, "pi-utils-skill-usage.json");
+		writeFileSync(usageFile, "{corrupt");
+		const dir = join(agentDir, "skills", "stable-cat");
+		const names = [
+			"beta-skill",
+			"zebra-quokka-handling",
+			...Array.from({ length: 25 }, (_, i) => `stable-filler-${i}`),
+		];
+		const nativeEntries = names.map((name) => {
+			mkdirSync(join(dir, name), { recursive: true });
+			writeFileSync(join(dir, name, "SKILL.md"), SKILL_CONTENT(name));
+			const desc = name.startsWith("zebra")
+				? "Use when handling quokka zebras"
+				: `Use when glue testing ${name}`;
+			return `  <skill>\n    <name>${name}</name>\n    <description>${desc}</description>\n    <location>${join(dir, name, "SKILL.md")}</location>\n  </skill>`;
+		});
+		const native = `head\n<available_skills>\n${nativeEntries.join("\n")}\n</available_skills>\nfoot`;
+		const notes: string[] = [];
+		const ctx = {
+			...fakeCtx(root),
+			ui: { notify: (m: string) => notes.push(m), setWidget: () => {} },
+		} as unknown as ExtensionContext;
+		const turn = async (
+			captured: Captured,
+			prompt: string,
+		): Promise<{ systemPrompt: string; message?: { content: string } }> =>
+			(await captured.handlers.get("before_agent_start")?.[0]?.(
+				{ type: "before_agent_start", prompt, systemPrompt: native },
+				ctx,
+			)) as { systemPrompt: string; message?: { content: string } };
+		const read = async (captured: Captured, id: string, path: string) => {
+			for (const h of captured.handlers.get("tool_call") ?? []) {
+				await h(
+					{
+						type: "tool_call",
+						toolCallId: id,
+						toolName: "read",
+						input: { path },
+					},
+					ctx,
+				);
+			}
+			for (const h of captured.handlers.get("tool_result") ?? []) {
+				await h(
+					{ type: "tool_result", toolCallId: id, content: [], isError: false },
+					ctx,
+				);
+			}
+		};
+
+		enableSkillWrite();
+		const { api, captured } = fakePi();
+		(await import("../extensions/skill-write.ts")).default(api);
+		await startSession(captured, ctx);
+		const t1 = await turn(captured, "ok");
+		expect(notes.some((n) => n.includes("usage file ignored"))).toBe(true); // corrupt → warn, no crash
+		expect(t1.systemPrompt).not.toContain("# core"); // nothing used yet
+
+		// Reading a skill must not change the system prompt (cache safety)…
+		const betaMd = join(dir, "beta-skill", "SKILL.md");
+		await read(captured, "r1", betaMd);
+		await read(captured, "r2", betaMd);
+		const t2 = await turn(captured, "ok");
+		expect(t2.systemPrompt).toBe(t1.systemPrompt);
+		// …but is recorded once per session in the cross-session file.
+		expect(
+			JSON.parse(readFileSync(usageFile, "utf8")).skills["beta-skill"].score,
+		).toBe(1);
+
+		// Tier 2: relevant prompt → hint message once; same prompt again → none.
+		const h1 = await turn(captured, "how do I handle quokka zebras?");
+		expect(h1.message?.content).toContain("zebra-quokka-handling");
+		expect(h1.systemPrompt).toBe(t1.systemPrompt);
+		expect(
+			(await turn(captured, "how do I handle quokka zebras?")).message,
+		).toBeUndefined();
+
+		// A new session picks the usage up as `core`.
+		await startSession(captured, ctx);
+		const next = await turn(captured, "ok");
+		expect(next.systemPrompt).toContain(
+			'<skill name="beta-skill" category="stable-cat">',
+		);
+
+		// skills.hint=false → no hint message at all.
+		writeFileSync(
+			join(agentDir, "pi-utils.json"),
+			JSON.stringify({ disabledTools: [], skills: { hint: false } }),
+		);
+		const { api: api2, captured: captured2 } = fakePi();
+		(await import("../extensions/skill-write.ts")).default(api2);
+		await startSession(captured2, ctx);
+		expect(
+			(await turn(captured2, "how do I handle quokka zebras?")).message,
+		).toBeUndefined();
 	});
 });

@@ -1,8 +1,8 @@
 /**
  * US-004 — session-scoped seen-map: which SKILL.md files the read tool
- * actually loaded this session. One map serves two consumers: the
- * read-before-write guard (patch/delete require a seen skill) and the smart
- * index's "recently-used" demotion exemption.
+ * actually loaded this session. Consumers: the read-before-write guard
+ * (patch/delete require a seen skill) and the tier-2 hint (never re-hint a
+ * skill already read).
  *
  * Keys are RESOLVED absolute paths (extension resolves the read input against
  * cwd before marking). bash `cat` never marks — tracking keys on the read
@@ -19,7 +19,9 @@ export interface SeenMap {
 	mark(path: string): void;
 	/** True when this exact resolved SKILL.md path was read this session. */
 	has(path: string): boolean;
-	/** Snapshot of all seen paths (for the index transform). */
+	/** A seen SKILL.md moved: the entry follows it (no-op when `from` was unseen). */
+	rename(from: string, to: string): void;
+	/** Snapshot of all seen paths. */
 	paths(): string[];
 }
 
@@ -31,6 +33,9 @@ export function createSeenMap(): SeenMap {
 		},
 		has(path) {
 			return seen.has(path);
+		},
+		rename(from, to) {
+			if (seen.delete(from)) seen.add(to);
 		},
 		paths() {
 			return [...seen];

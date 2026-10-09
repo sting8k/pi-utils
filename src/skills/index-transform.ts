@@ -1,9 +1,11 @@
 /**
- * US-004 — smart index transform: re-render native's `<available_skills>`
- * block with a visibility pipeline. ONE pass per turn from before_agent_start;
- * the native tag name is kept so the rules block and any tooling keyed on it
- * stay coherent. Parse failure or missing block → null (caller passes the
- * system prompt through unchanged — worst case = native).
+ * US-004/US-005 — tier-1 skills catalog: re-render native's
+ * `<available_skills>` block as a SMALL, SESSION-STABLE catalog. The caller
+ * computes it once per session and reuses the string verbatim every turn, so
+ * the system prompt never changes mid-session (prompt-cache safe). The native
+ * tag name is kept so the rules block and any tooling keyed on it stay
+ * coherent. Parse failure or missing block → null (caller passes the system
+ * prompt through unchanged — worst case = native).
  *
  * Data split (spec): WHICH skills exist comes from the native block
  * (name + location per entry — user dir, project dir, extension-contributed,
@@ -13,9 +15,13 @@
  * we only decide how loudly each shows.
  *
  * Pipeline: platforms excludes host → requires missing from PATH →
- * dirs declares no segment of cwd → disable-model-invocation →
- * over-limit demotion (names-only) → quality flags → tail section
- * (collapsed lines + hidden-count pointer).
+ * dirs declares no segment of cwd → disable-model-invocation → emit:
+ *   - `core`: the `coreLimit` most-used skills (cross-session usage scores)
+ *     with a short description;
+ *   - one `<category>` line per category under the skills root, names only;
+ *   - skills outside the skills root (project / contributed) keep their
+ *     per-root group with short descriptions;
+ *   - a pointer line when anything was hidden.
  *
  * Pure module: fs access injectable for tests.
  */
@@ -30,6 +36,7 @@ export interface SkillIndexEntry {
 }
 
 export interface SkillMeta {
+	tags?: unknown;
 	platforms?: unknown;
 	requires?: unknown;
 	dirs?: unknown;
@@ -50,38 +57,58 @@ export interface IndexTransformDeps {
 	requiresCheck: (bin: string) => boolean;
 	/** Frontmatter cache keyed by SKILL.md path — caller persists per session. */
 	metaCache: Map<string, SkillMeta | null>;
+	/** Max skills in the `core` group (0 = none). */
+	coreLimit: number;
+	/** Decayed cross-session usage score per skill NAME (see usage.ts). */
+	usage: Map<string, number>;
 	/** Injectable fs for tests. Defaults to node fs. */
 	readSkillFile?: (path: string) => string | null;
 }
 
+/** A skill that survived the visibility pipeline (feeds the tier-2 hint). */
+export interface VisibleSkill extends SkillIndexEntry {
+	tags: string[];
+}
+
+/** Description cap in `core` and outside-root entries. */
+export const CORE_DESC_MAX = 100;
+
 export interface IndexTransformResult {
 	/** The re-emitted `<available_skills>…</available_skills>` block. */
 	block: string;
-	/** Offset of the original block in the system prompt (for splicing). */
-	start: number;
-	end: number;
 	hidden: string[];
-	demoted: string[];
+	core: string[];
 	flagged: string[];
+	visible: VisibleSkill[];
+}
+
+const NATIVE_BLOCK_RE = /<available_skills>[\s\S]*?<\/available_skills>/;
+
+/** Swap the native block in `systemPrompt` for `block` (unchanged when absent). */
+export function replaceSkillsBlock(
+	systemPrompt: string,
+	block: string,
+): string {
+	const m = NATIVE_BLOCK_RE.exec(systemPrompt);
+	if (!m) return systemPrompt;
+	return (
+		systemPrompt.slice(0, m.index) +
+		block +
+		systemPrompt.slice(m.index + m[0].length)
+	);
 }
 
 export function transformSkillsIndex(
 	systemPrompt: string,
-	fullLimit: number,
-	recentlyUsed: string[],
 	deps: IndexTransformDeps,
 ): IndexTransformResult | null {
-	const blockMatch = /<available_skills>([\s\S]*?)<\/available_skills>/.exec(
-		systemPrompt,
-	);
+	const blockMatch = NATIVE_BLOCK_RE.exec(systemPrompt);
 	if (!blockMatch) return null;
 
 	const entryRe =
 		/<skill>\s*<name>([\s\S]*?)<\/name>\s*<description>([\s\S]*?)<\/description>\s*<location>([\s\S]*?)<\/location>\s*<\/skill>/g;
 	const entries: SkillIndexEntry[] = [];
-	for (const m of systemPrompt
-		.slice(blockMatch.index, blockMatch.index + blockMatch[0].length)
-		.matchAll(entryRe)) {
+	for (const m of blockMatch[0].matchAll(entryRe)) {
 		entries.push({
 			name: unescapeXml(m[1] ?? "").trim(),
 			description: unescapeXml(m[2] ?? "").trim(),
@@ -90,8 +117,6 @@ export function transformSkillsIndex(
 	}
 	// Zero entries parsed → we don't understand the native format anymore.
 	if (entries.length === 0) return null;
-
-	const recent = new Set(recentlyUsed);
 
 	// Step 1–3: visibility hides.
 	const visible: Array<{ entry: SkillIndexEntry; meta: SkillMeta | null }> = [];
@@ -124,85 +149,80 @@ export function transformSkillsIndex(
 		visible.push({ entry, meta });
 	}
 
-	// Step 4: over-limit demotion — categories without a recently-used skill
-	// collapse to names-only.
-	let demotedCategories: string[] = [];
-	if (visible.length > fullLimit) {
-		const categories = new Map<string, boolean>(); // category → hasRecent
-		for (const { entry } of visible) {
-			const category = categoryOf(entry.location, deps.skillsRoot);
-			const has = categories.get(category) === true;
-			categories.set(category, has || recent.has(entry.location));
-		}
-		demotedCategories = [...categories.keys()].filter(
-			(category) => !categories.get(category),
-		);
-	}
-
-	// Step 5: quality flags — missing description (native renders only when
-	// present, so this is near-dead but cheap), malformed frontmatter, and
-	// near-identical desc prefixes within one category.
-	const overlapGroups = new Map<string, SkillIndexEntry[]>();
-	for (const { entry } of visible) {
-		const category = categoryOf(entry.location, deps.skillsRoot);
-		const key = `${category}::${normalizeDesc(entry.description).slice(0, 60)}`;
-		const group = overlapGroups.get(key);
-		if (group) group.push(entry);
-		else overlapGroups.set(key, [entry]);
-	}
-	const overlapByName = new Map<string, string[]>();
-	for (const group of overlapGroups.values()) {
-		if (group.length < 2) continue;
-		for (const entry of group) {
-			const others = group.filter((e) => e !== entry).map((e) => e.name);
-			overlapByName.set(entry.name, others);
-		}
-	}
-
 	const flagged: string[] = [];
-	const shownFull: Array<{ entry: SkillIndexEntry; suffix: string }> = [];
-	for (const { entry, meta } of visible) {
-		if (
-			demotedCategories.includes(categoryOf(entry.location, deps.skillsRoot))
-		) {
-			continue;
-		}
-		const flags: string[] = [];
-		if (meta === null || meta.malformed === true) {
-			flags.push("⚠ malformed frontmatter");
-			flagged.push(entry.name);
-		}
-		if (entry.description.trim().length === 0) {
-			flags.push("⚠ missing description");
-			flagged.push(entry.name);
-		}
-		const others = overlapByName.get(entry.name);
-		if (others) {
-			flags.push(`⚠ possible overlap ${others.join("/")}≈${entry.name}`);
-			flagged.push(entry.name);
-		}
-		shownFull.push({
+	const malformed = (meta: SkillMeta | null) =>
+		meta === null || meta.malformed === true;
+	const rows = visible.map(({ entry, meta }) => {
+		const bad = malformed(meta);
+		if (bad) flagged.push(entry.name);
+		return {
 			entry,
-			suffix: flags.length > 0 ? ` ${flags.join(" ")}` : "",
-		});
-	}
+			bad,
+			category: categoryOf(entry.location, deps.skillsRoot),
+			tags: stringArray(meta?.tags),
+		};
+	});
+	const inRoot = rows.filter((r) => r.category !== "other");
+	const external = rows.filter((r) => r.category === "other");
 
-	// Emit (spec e9150d8): entries grouped by root dir — one `# <abs root>`
-	// header per group, entries carry only name + inline description.
-	// `location=` appears ONLY when the same name exists under two different
-	// roots (native collision case — the attr then disambiguates). Repeating
-	// a 40-char root prefix on every entry is pure prompt waste.
-	const rootsByName = new Map<string, Set<string>>();
-	for (const { entry } of shownFull) {
-		const root = rootOf(entry.location, deps.knownRoots);
-		const roots = rootsByName.get(entry.name);
-		if (roots) roots.add(root);
-		else rootsByName.set(entry.name, new Set([root]));
-	}
+	// core: most-used in-root skills. Cold start (no usage yet) → no core
+	// group at all rather than padding it with arbitrary skills.
+	const coreRows = inRoot
+		.filter((r) => (deps.usage.get(r.entry.name) ?? 0) > 0)
+		.sort(
+			(a, b) =>
+				(deps.usage.get(b.entry.name) ?? 0) -
+					(deps.usage.get(a.entry.name) ?? 0) ||
+				a.entry.name.localeCompare(b.entry.name),
+		)
+		.slice(0, deps.coreLimit);
 
+	const flag = (bad: boolean) => (bad ? " ⚠ malformed frontmatter" : "");
 	const lines: string[] = ["<available_skills>"];
+	if (coreRows.length > 0) {
+		lines.push("# core (most used)");
+		for (const { entry, bad, category } of coreRows) {
+			lines.push(
+				`  <skill name="${escapeXml(entry.name)}" category="${escapeXml(category)}">${escapeXml(truncateDesc(entry.description, CORE_DESC_MAX))}${flag(bad)}</skill>`,
+			);
+		}
+	}
+
+	if (inRoot.length > 0) {
+		lines.push(
+			`# categories in ${escapeXml(deps.skillsRoot)} — file = <category>/<name>/SKILL.md (${UNCATEGORIZED}: <name>/SKILL.md)`,
+		);
+		const byCategory = new Map<string, string[]>();
+		for (const { entry, bad, category } of inRoot) {
+			const names = byCategory.get(category) ?? [];
+			names.push(`${entry.name}${bad ? "⚠" : ""}`);
+			byCategory.set(category, names);
+		}
+		const categories = [...byCategory.keys()].sort(
+			(a, b) =>
+				Number(a === UNCATEGORIZED) - Number(b === UNCATEGORIZED) ||
+				a.localeCompare(b),
+		);
+		for (const category of categories) {
+			const names = (byCategory.get(category) ?? []).sort();
+			lines.push(
+				`  <category name="${escapeXml(category)}">${escapeXml(names.join(", "))}</category>`,
+			);
+		}
+	}
+
+	// Outside the skills root (project / extension-contributed): one group per
+	// root, short descriptions. `location=` only when the same name lives under
+	// two roots (native collision case — the attr then disambiguates).
+	const rootsByName = new Map<string, Set<string>>();
+	for (const { entry } of rows) {
+		const root = rootOf(entry.location, deps.knownRoots);
+		const roots = rootsByName.get(entry.name) ?? new Set<string>();
+		roots.add(root);
+		rootsByName.set(entry.name, roots);
+	}
 	let currentRoot: string | null = null;
-	for (const { entry, suffix } of shownFull) {
+	for (const { entry, bad } of external) {
 		const root = rootOf(entry.location, deps.knownRoots);
 		if (root !== currentRoot) {
 			lines.push(`# ${escapeXml(root)}`);
@@ -213,44 +233,26 @@ export function transformSkillsIndex(
 			? ` location="${escapeXml(entry.location)}"`
 			: "";
 		lines.push(
-			`  <skill name="${escapeXml(entry.name)}"${locationAttr}>${escapeXml(entry.description)}${suffix}</skill>`,
+			`  <skill name="${escapeXml(entry.name)}"${locationAttr}>${escapeXml(truncateDesc(entry.description, CORE_DESC_MAX))}${flag(bad)}</skill>`,
 		);
 	}
 
-	// Tail section: everything NOT shown in full lives under its own header,
-	// separated by a blank line — so neither the collapsed lines nor the
-	// hidden-count pointer read as entries of the last root group (a reader
-	// mis-attributed the pointer's path to the group above it).
-	const demoted: string[] = [];
-	if (hidden.length + demotedCategories.length > 0) {
-		lines.push("", "# not shown in full");
-		for (const category of demotedCategories) {
-			const names = visible
-				.filter(
-					({ entry }) =>
-						categoryOf(entry.location, deps.skillsRoot) === category,
-				)
-				.map(({ entry }) => entry.name);
-			demoted.push(...names);
-			lines.push(
-				`  <collapsed category="${escapeXml(category)}">${escapeXml(names.join(", "))}</collapsed>`,
-			);
-		}
-		if (hidden.length > 0) {
-			lines.push(
-				`  ${hidden.length} hidden by platforms/requires/dirs — ls ${deps.skillsRoot} or /skill:<name>`,
-			);
-		}
+	// Own section so the pointer never reads as an entry of the group above.
+	if (hidden.length > 0) {
+		lines.push(
+			"",
+			"# hidden",
+			`  ${hidden.length} hidden by platforms/requires/dirs — ls ${deps.skillsRoot} or /skill:<name>`,
+		);
 	}
 	lines.push("</available_skills>");
 
 	return {
 		block: lines.join("\n"),
-		start: blockMatch.index,
-		end: blockMatch.index + blockMatch[0].length,
 		hidden,
-		demoted,
+		core: coreRows.map((r) => r.entry.name),
 		flagged,
+		visible: rows.map((r) => ({ ...r.entry, tags: r.tags })),
 	};
 }
 
@@ -276,6 +278,7 @@ function readMeta(
 		platforms: fm.platforms,
 		requires: fm.requires,
 		dirs: fm.dirs,
+		tags: fm.tags,
 		disableModelInvocation: fm["disable-model-invocation"],
 	};
 }
@@ -327,20 +330,31 @@ export function rootOf(location: string, knownRoots: string[]): string {
 	}
 }
 
+/** Display name for skills sitting directly under the skills root. */
+const UNCATEGORIZED = "uncategorized";
+
 /**
- * Category = the skill dir's PARENT relative to the skills root (native
- * layout: <skillsRoot>/<category>/<name>/SKILL.md; root-level skills group
- * under "general", external locations under "other").
+ * Category = the skill dir's PARENT relative to the skills root (layout:
+ * <skillsRoot>/<category>/<name>/SKILL.md; root-level skills are legacy and
+ * group under "uncategorized", external locations under "other").
  */
 export function categoryOf(location: string, skillsRoot: string): string {
 	const rel = relative(skillsRoot, dirname(dirname(location)));
-	if (rel.startsWith("..") || rel.length === 0)
-		return rel.startsWith("..") ? "other" : "general";
-	return rel;
+	if (rel.startsWith("..")) return "other";
+	return rel.length === 0 ? UNCATEGORIZED : rel;
 }
 
-function normalizeDesc(desc: string): string {
-	return desc.toLowerCase().replace(/\s+/g, " ").trim();
+/**
+ * One-line description: the first sentence when it fits `max`, else a
+ * word-boundary cut with an ellipsis.
+ */
+export function truncateDesc(desc: string, max: number): string {
+	const flat = desc.replace(/\s+/g, " ").trim();
+	const sentence = /^.*?[.!?](?=\s|$)/.exec(flat)?.[0] ?? flat;
+	if (sentence.length <= max) return sentence;
+	const cut = flat.slice(0, max - 1);
+	const space = cut.lastIndexOf(" ");
+	return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
 // Native's escapeXml — same mapping, so our re-emit is drop-in parseable by

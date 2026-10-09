@@ -55,8 +55,10 @@ export interface SkillsSettings {
 	 * passes the block through byte-identical.
 	 */
 	index: "smart" | "native";
-	/** Smart mode: categories without recently-used skills collapse to names-only above this count. */
-	indexFullLimit: number;
+	/** Tier-1 `core` group size: most-used skills shown with a short description; 0 = no core group. */
+	coreLimit: number;
+	/** Tier-2 per-turn skill hint (before_agent_start message); needs the smart index. */
+	hint: boolean;
 	/**
 	 * Iterations since last skill_write before the nudge line fires on a
 	 * tool result (once per interval, then reset); 0 disables.
@@ -114,7 +116,8 @@ export const DEFAULT_SETTINGS: PiUtilsSettings = {
 	},
 	skills: {
 		index: "smart",
-		indexFullLimit: 50,
+		coreLimit: 15,
+		hint: true,
 		// Nudge ON by default (spec 499573a): the only active learn-trigger
 		// in v1. 0 = off.
 		nudgeInterval: 10,
@@ -408,7 +411,7 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 		}
 	}
 
-	// skills (US-004): a missing section or key stays silent — A1 precedent.
+	// skills (US-004/005): a missing section or key stays silent — A1 precedent.
 	const skRaw = merged.skills;
 	if (skRaw !== undefined) {
 		if (!isRecord(skRaw)) {
@@ -424,14 +427,29 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 					);
 				}
 			}
-			if ("indexFullLimit" in skRaw) {
-				const value = positiveInt(skRaw.indexFullLimit);
+			if ("coreLimit" in skRaw) {
+				const value = skRaw.coreLimit;
+				// 0 is meaningful (no core group) — non-negative int, like nudgeInterval.
+				if (
+					typeof value === "number" &&
+					Number.isInteger(value) &&
+					value >= 0
+				) {
+					settings.skills.coreLimit = value;
+				} else {
+					warnings.push(
+						`"skills.coreLimit" invalid (${JSON.stringify(value)}) — using default`,
+					);
+				}
+			}
+			if ("hint" in skRaw) {
+				const value = bool(skRaw.hint);
 				if (value === undefined) {
 					warnings.push(
-						`"skills.indexFullLimit" invalid (${JSON.stringify(skRaw.indexFullLimit)}) — using default`,
+						`"skills.hint" invalid (${JSON.stringify(skRaw.hint)}) — using default`,
 					);
 				} else {
-					settings.skills.indexFullLimit = value;
+					settings.skills.hint = value;
 				}
 			}
 			if ("nudgeInterval" in skRaw) {

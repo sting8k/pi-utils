@@ -20,6 +20,9 @@ import { createNudgeTracker } from "../src/skills/nudge.ts";
 import {
 	createSkill,
 	deleteSkill,
+	listCategories,
+	locateSkill,
+	moveSkill,
 	patchSkill,
 	resolveSkillMdPath,
 	SKILL_MD,
@@ -100,17 +103,22 @@ describe("frontmatter parser (US-004)", () => {
 describe("write ops (snapshot → write → verify)", () => {
 	test("create writes the file and reports warnings; exists → error naming patch", () => {
 		const result = createSkill(
-			{ skillsRoot: root, name: "alpha" },
+			{
+				skillsRoot: root,
+				name: "alpha",
+				category: "cat-a",
+				newCategory: true,
+			},
 			GOOD_SKILL("alpha", `Use when ${"y".repeat(70)}`),
 		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return; // narrowing
-		const path = join(root, "alpha", SKILL_MD);
+		const path = join(root, "cat-a", "alpha", SKILL_MD);
 		expect(readFileSync(path, "utf8")).toContain("name: alpha");
 		expect(result.warnings).toHaveLength(1); // long-desc advisory
 
 		const dup = createSkill(
-			{ skillsRoot: root, name: "alpha" },
+			{ skillsRoot: root, name: "alpha", category: "cat-a" },
 			GOOD_SKILL("alpha"),
 		);
 		expect(dup.ok).toBe(false);
@@ -119,7 +127,12 @@ describe("write ops (snapshot → write → verify)", () => {
 
 	test("create honours category and rejects traversal-ish names", () => {
 		const nested = createSkill(
-			{ skillsRoot: root, name: "beta", category: "writing" },
+			{
+				skillsRoot: root,
+				name: "beta",
+				category: "writing",
+				newCategory: true,
+			},
 			GOOD_SKILL("beta"),
 		);
 		expect(nested.ok).toBe(true);
@@ -130,7 +143,7 @@ describe("write ops (snapshot → write → verify)", () => {
 	});
 
 	test("patch: exact, fuzzy fallback, multi-match without replace_all", () => {
-		const path = join(root, "alpha", SKILL_MD);
+		const path = join(root, "cat-a", "alpha", SKILL_MD);
 		const exact = patchSkill(
 			path,
 			"Rules with why.",
@@ -165,7 +178,7 @@ describe("write ops (snapshot → write → verify)", () => {
 	});
 
 	test("patch: missing old_string → fixable error, file untouched", () => {
-		const path = join(root, "alpha", SKILL_MD);
+		const path = join(root, "cat-a", "alpha", SKILL_MD);
 		const before = readFileSync(path, "utf8");
 		const miss = patchSkill(path, "not in the file at all", "x");
 		expect(miss.ok).toBe(false);
@@ -206,10 +219,170 @@ describe("write ops (snapshot → write → verify)", () => {
 	});
 });
 
+describe("skill organization (US-005): categories, locate-by-name, move", () => {
+	const roots: string[] = [];
+	function freshRoot(): string {
+		const dir = mkdtempSync(join(tmpdir(), "pi-utils-org-"));
+		roots.push(dir);
+		return dir;
+	}
+	function seed(skillsRoot: string, name: string, category?: string): string {
+		const dir = join(skillsRoot, ...(category ? [category] : []), name);
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, SKILL_MD), GOOD_SKILL(name));
+		return dir;
+	}
+	afterAll(() => {
+		for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+	});
+
+	test("create: category required; list is one line with counts; new_category creates", () => {
+		const skillsRoot = freshRoot();
+		seed(skillsRoot, "a1", "testing");
+		seed(skillsRoot, "a2", "testing");
+		seed(skillsRoot, "b1", "git-release");
+		seed(skillsRoot, "legacy"); // root-level skill is not a category
+
+		expect(listCategories(skillsRoot)).toEqual([
+			{ name: "git-release", count: 1 },
+			{ name: "testing", count: 2 },
+		]);
+		const content = GOOD_SKILL("fresh");
+
+		const missing = createSkill({ skillsRoot, name: "fresh" }, content);
+		expect(missing.ok).toBe(false);
+		if (!missing.ok) {
+			expect(missing.error).not.toContain("\n");
+			expect(missing.error).toContain("categories: git-release(1) testing(2)");
+		}
+
+		const unknown = createSkill(
+			{ skillsRoot, name: "fresh", category: "typo" },
+			content,
+		);
+		expect(unknown.ok).toBe(false);
+		expect(listCategories(skillsRoot).map((c) => c.name)).not.toContain("typo");
+
+		const skillAsCategory = createSkill(
+			{ skillsRoot, name: "fresh", category: "legacy", newCategory: true },
+			content,
+		);
+		expect(skillAsCategory.ok).toBe(false);
+
+		expect(
+			createSkill({ skillsRoot, name: "fresh", category: "testing" }, content)
+				.ok,
+		).toBe(true);
+		const created = createSkill(
+			{ skillsRoot, name: "other", category: "novel", newCategory: true },
+			GOOD_SKILL("other"),
+		);
+		expect(created.ok).toBe(true);
+		expect(listCategories(skillsRoot).map((c) => c.name)).toContain("novel");
+
+		// Names are unique across categories (locate-by-name depends on it).
+		const dup = createSkill(
+			{ skillsRoot, name: "fresh", category: "git-release" },
+			content,
+		);
+		expect(dup.ok).toBe(false);
+		if (!dup.ok) expect(dup.error).toMatch(/testing\/fresh/);
+	});
+
+	test("locate: by name in any category or root; ambiguous and contradicting category error", () => {
+		const skillsRoot = freshRoot();
+		seed(skillsRoot, "solo", "testing");
+		seed(skillsRoot, "old"); // legacy root-level
+		seed(skillsRoot, "twin", "testing");
+		seed(skillsRoot, "twin", "ops"); // only reachable by hand-made layouts
+
+		const solo = locateSkill(skillsRoot, "solo");
+		expect(solo.ok && solo.category).toBe("testing");
+		expect(locateSkill(skillsRoot, "solo", "testing").ok).toBe(true);
+		const old = locateSkill(skillsRoot, "old");
+		expect(old.ok && old.category).toBeUndefined();
+
+		const contradict = locateSkill(skillsRoot, "solo", "ops");
+		expect(contradict.ok).toBe(false);
+		if (!contradict.ok) expect(contradict.error).toContain("testing/solo");
+
+		const ambiguous = locateSkill(skillsRoot, "twin");
+		expect(ambiguous.ok).toBe(false);
+		if (!ambiguous.ok) {
+			expect(ambiguous.error).toContain(join("ops", "twin"));
+			expect(ambiguous.error).toContain(join("testing", "twin"));
+		}
+		const picked = locateSkill(skillsRoot, "twin", "ops");
+		expect(picked.ok && picked.category).toBe("ops");
+
+		expect(locateSkill(skillsRoot, "nope").ok).toBe(false);
+	});
+
+	test("move: whole dir lands in the category; same category / occupied target refused", () => {
+		const skillsRoot = freshRoot();
+		const dir = seed(skillsRoot, "mover"); // legacy root skill
+		mkdirSync(join(dir, "refs"));
+		writeFileSync(join(dir, "refs", "x.md"), "reference");
+		seed(skillsRoot, "taken", "ops");
+
+		const from = locateSkill(skillsRoot, "mover");
+		if (!from.ok) throw new Error(from.error);
+		expect(
+			moveSkill(from, { skillsRoot, name: "mover", category: "fresh-cat" }).ok,
+		).toBe(false); // new category needs the flag
+		const moved = moveSkill(from, {
+			skillsRoot,
+			name: "mover",
+			category: "fresh-cat",
+			newCategory: true,
+		});
+		expect(moved.ok && moved.path).toBe(
+			join(skillsRoot, "fresh-cat", "mover", SKILL_MD),
+		);
+		expect(() => readFileSync(join(dir, SKILL_MD))).toThrow();
+		expect(
+			readFileSync(
+				join(skillsRoot, "fresh-cat", "mover", "refs", "x.md"),
+				"utf8",
+			),
+		).toBe("reference");
+
+		const again = locateSkill(skillsRoot, "mover");
+		if (!again.ok) throw new Error(again.error);
+		expect(
+			moveSkill(again, { skillsRoot, name: "mover", category: "fresh-cat" }).ok,
+		).toBe(false);
+		// A hand-made occupied target dir is never overwritten.
+		mkdirSync(join(skillsRoot, "ops", "mover"));
+		expect(
+			moveSkill(again, { skillsRoot, name: "mover", category: "ops" }).ok,
+		).toBe(false);
+	});
+
+	test("move: failure rolls back — skill intact, no stray new category", () => {
+		const skillsRoot = freshRoot();
+		const dir = seed(skillsRoot, "stuck", "src");
+		const from = locateSkill(skillsRoot, "stuck");
+		if (!from.ok) throw new Error(from.error);
+		chmodSync(join(skillsRoot, "src"), 0o555); // cannot rename out of it
+		const result = moveSkill(from, {
+			skillsRoot,
+			name: "stuck",
+			category: "dest",
+			newCategory: true,
+		});
+		chmodSync(join(skillsRoot, "src"), 0o755);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.rolledBack).toBe(true);
+		expect(readFileSync(join(dir, SKILL_MD), "utf8")).toContain("name: stuck");
+		expect(listCategories(skillsRoot).map((c) => c.name)).toEqual(["src"]);
+	});
+});
+
 describe("read-before-write guard data (seen-map + path resolve)", () => {
 	test("seen-map marks/dedupes; resolveSkillMdPath scopes to the root", () => {
 		const seen = createSeenMap();
-		const skillMd = join(root, "alpha", SKILL_MD);
+		const skillMd = join(root, "cat-a", "alpha", SKILL_MD);
 		expect(seen.has(skillMd)).toBe(false);
 		seen.mark(skillMd);
 		seen.mark(skillMd);
@@ -217,19 +390,21 @@ describe("read-before-write guard data (seen-map + path resolve)", () => {
 		expect(seen.paths()).toHaveLength(1);
 
 		expect(resolveSkillMdPath(skillMd, root, "/somewhere")).toBe(skillMd);
-		expect(resolveSkillMdPath("alpha/SKILL.md", root, root)).toBe(skillMd);
+		expect(resolveSkillMdPath("cat-a/alpha/SKILL.md", root, root)).toBe(
+			skillMd,
+		);
 		expect(resolveSkillMdPath("/elsewhere/SKILL.md", root, root)).toBeNull();
 		expect(
-			resolveSkillMdPath(join(root, "alpha", "other.md"), root, root),
+			resolveSkillMdPath(join(root, "cat-a", "alpha", "other.md"), root, root),
 		).toBeNull();
 		expect(
 			resolveSkillMdPath(join(root, "..", "evil", "SKILL.md"), root, root),
 		).toBeNull();
 		// Same spellings pi's read() accepts must mark the same resolved key.
 		expect(resolveSkillMdPath(`@${skillMd}`, root, "/x")).toBe(skillMd);
-		expect(resolveSkillMdPath(`${root}/./alpha//${SKILL_MD}`, root, "/x")).toBe(
-			skillMd,
-		);
+		expect(
+			resolveSkillMdPath(`${root}/./cat-a/alpha//${SKILL_MD}`, root, "/x"),
+		).toBe(skillMd);
 		expect(
 			resolveSkillMdPath(
 				`~/${relative(dirname(root), skillMd)}`,
@@ -286,13 +461,14 @@ describe("nudge tracker (spec 499573a: fire once at threshold, reset)", () => {
 });
 
 describe("settings.skills", () => {
-	test("defaults: smart / 50 / 10; nudge 0 and native accepted; invalid warned", () => {
+	test("defaults: smart / core 15 / hint on / nudge 10; 0 and native accepted; invalid warned", () => {
 		const dir = mkdtempSync(join(tmpdir(), "pi-utils-skills-settings-"));
 		try {
 			const defaults = loadSettings(dir).settings.skills;
 			expect(defaults).toEqual({
 				index: "smart",
-				indexFullLimit: 50,
+				coreLimit: 15,
+				hint: true,
 				nudgeInterval: 10,
 			});
 
@@ -304,7 +480,8 @@ describe("settings.skills", () => {
 			expect(custom.warnings).toEqual([]);
 			expect(custom.settings.skills).toEqual({
 				index: "native",
-				indexFullLimit: 50,
+				coreLimit: 15,
+				hint: true,
 				nudgeInterval: 0,
 			});
 
@@ -316,7 +493,8 @@ describe("settings.skills", () => {
 			expect(invalid.warnings).toHaveLength(2);
 			expect(invalid.settings.skills).toEqual({
 				index: "smart",
-				indexFullLimit: 50,
+				coreLimit: 15,
+				hint: true,
 				nudgeInterval: 10,
 			});
 		} finally {
@@ -327,6 +505,9 @@ describe("settings.skills", () => {
 
 /** validateTarget is exercised through createSkill for path safety. */
 function validateTargetish(name: string): string {
-	const bad = createSkill({ skillsRoot: root, name }, GOOD_SKILL("x"));
+	const bad = createSkill(
+		{ skillsRoot: root, name, category: "cat-a" },
+		GOOD_SKILL("x"),
+	);
 	return bad.ok ? "" : bad.error;
 }

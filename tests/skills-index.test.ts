@@ -5,7 +5,9 @@ import { join, normalize } from "node:path";
 import { parseSkillFile } from "../src/skills/frontmatter.ts";
 import {
 	categoryOf,
+	replaceSkillsBlock,
 	transformSkillsIndex,
+	truncateDesc,
 } from "../src/skills/index-transform.ts";
 
 let root = "";
@@ -57,8 +59,8 @@ function transform(
 	entries: Array<[string, string, string]>,
 	opts: {
 		hostPlatform?: string;
-		fullLimit?: number;
-		recentlyUsed?: string[];
+		coreLimit?: number;
+		usage?: Record<string, number>;
 		requires?: (bin: string) => boolean;
 		cwd?: string;
 	} = {},
@@ -66,24 +68,21 @@ function transform(
 	const prompt = `preamble\n${nativeBlock(entries)}\nepilogue`;
 	return {
 		prompt,
-		result: transformSkillsIndex(
-			prompt,
-			opts.fullLimit ?? 50,
-			opts.recentlyUsed ?? [],
-			{
-				skillsRoot: root,
-				knownRoots: [root],
-				cwd: opts.cwd ?? "/home/proj",
-				hostPlatform: opts.hostPlatform ?? "darwin",
-				requiresCheck: opts.requires ?? (() => true),
-				metaCache,
-			},
-		),
+		result: transformSkillsIndex(prompt, {
+			skillsRoot: root,
+			knownRoots: [root],
+			cwd: opts.cwd ?? "/home/proj",
+			hostPlatform: opts.hostPlatform ?? "darwin",
+			requiresCheck: opts.requires ?? (() => true),
+			metaCache,
+			coreLimit: opts.coreLimit ?? 15,
+			usage: new Map(Object.entries(opts.usage ?? {})),
+		}),
 	};
 }
 
-describe("smart index transform (US-004)", () => {
-	test("keeps the native tag name; groups by root; location only on collision", () => {
+describe("tier-1 catalog (US-004/US-005)", () => {
+	test("keeps the native tag name; root skills → categories; location only on collision", () => {
 		const entries = [
 			skill("alpha", { name: "alpha", description: "desc of alpha" }),
 		];
@@ -91,14 +90,15 @@ describe("smart index transform (US-004)", () => {
 		expect(result).not.toBeNull();
 		if (!result) return;
 		expect(result.block.startsWith("<available_skills>")).toBe(true);
-		// Group header carries the abs root ONCE; the entry is name+desc only —
-		// no location attr without a collision.
-		expect(result.block).toContain(`# ${root}`);
-		expect(result.block).toContain('<skill name="alpha">desc of alpha</skill>');
+		// Names only; the root appears once, in the categories header.
+		expect(result.block).toContain(
+			'<category name="uncategorized">alpha</category>',
+		);
+		expect(result.block).not.toContain("desc of alpha");
 		expect(result.block).not.toContain("location=");
 
-		// Collision: same name under a different known root → both entries
-		// carry location=.
+		// Collision: same name under a different root → only the outside-root
+		// twin (own `# <root>` group) carries location=.
 		const otherRoot = normalize(join(root, "..", "other-skills-root"));
 		mkdirSync(join(otherRoot, "alpha"), { recursive: true });
 		const alphaLocation = join(otherRoot, "alpha", "SKILL.md");
@@ -112,19 +112,16 @@ describe("smart index transform (US-004)", () => {
 		]);
 		expect(collided.result).not.toBeNull();
 		if (!collided.result) return;
-		expect(collided.result.block).toContain(`# ${root}`);
 		expect(collided.result.block).toContain(`# ${otherRoot}`);
-		const locationLines = collided.result.block
-			.split("\n")
-			.filter((line) => line.includes("location="));
-		expect(locationLines).toHaveLength(2);
-		expect(collided.result.block).toContain(`location="${alphaLocation}"`);
+		expect(collided.result.block).toContain(
+			`<skill name="alpha" location="${alphaLocation}">project twin</skill>`,
+		);
 
 		// Spliced back into the prompt: native header/epilogue survive.
-		const spliced =
-			prompt.slice(0, result.start) + result.block + prompt.slice(result.end);
-		expect(spliced).toContain("preamble");
-		expect(spliced).toContain("desc of alpha");
+		const spliced = replaceSkillsBlock(prompt, result.block);
+		expect(spliced.startsWith("preamble\n<available_skills>")).toBe(true);
+		expect(spliced.endsWith("</available_skills>\nepilogue")).toBe(true);
+		expect(spliced).not.toContain("desc of alpha");
 	});
 
 	test("scalar platforms/requires (YAML shorthand) normalize and filter", () => {
@@ -148,7 +145,7 @@ describe("smart index transform (US-004)", () => {
 		const { result } = transform(entries, { requires: () => false });
 		if (!result) return expect(result).not.toBeNull();
 		expect(result.hidden).toEqual(["win-scalar", "missing-bin-scalar"]);
-		expect(result.block).toContain('"host-scalar"');
+		expect(result.block).toContain("host-scalar");
 	});
 
 	test("platforms: windows-only skill hidden on darwin", () => {
@@ -167,10 +164,10 @@ describe("smart index transform (US-004)", () => {
 		const { result } = transform(entries);
 		if (!result) return expect(result).not.toBeNull();
 		expect(result.hidden).toEqual(["win-only"]);
-		expect(result.block).toContain('"mac-ok"');
-		expect(result.block).not.toContain('"win-only"');
+		expect(result.block).toContain("mac-ok");
+		expect(result.block).not.toContain("win-only</category>");
 		expect(result.block).toMatch(
-			/\n\n# not shown in full\n {2}1 hidden by platforms\/requires\/dirs — ls .+ or \/skill:<name>\n<\/available_skills>$/,
+			/\n\n# hidden\n {2}1 hidden by platforms\/requires\/dirs — ls .+ or \/skill:<name>\n<\/available_skills>$/,
 		);
 	});
 
@@ -214,11 +211,12 @@ describe("smart index transform (US-004)", () => {
 		});
 		if (!result) return expect(result).not.toBeNull();
 		expect(result.hidden).toEqual(["elsewhere", "substr"]);
-		expect(result.block).toContain('"pinned"'); // one-segment repo pinned
-		expect(result.block).toContain('"family"'); // ancestor segment
-		expect(result.block).toContain('"noscoped"'); // absent key → shown
-		expect(result.block).not.toContain('"elsewhere"');
-		expect(result.block).not.toContain('"substr"'); // no substring match
+		const names = result.visible.map((v) => v.name);
+		expect(names).toContain("pinned"); // one-segment repo pinned
+		expect(names).toContain("family"); // ancestor segment
+		expect(names).toContain("noscoped"); // absent key → shown
+		expect(names).not.toContain("elsewhere");
+		expect(names).not.toContain("substr"); // no substring match
 		expect(result.block).toMatch(
 			/2 hidden by platforms\/requires\/dirs — ls .+/,
 		);
@@ -237,81 +235,93 @@ describe("smart index transform (US-004)", () => {
 		expect(result.hidden).toEqual(["slash-only"]);
 	});
 
-	test("over-limit: categories without recently-used collapse to names-only", () => {
+	test("core: top-N by usage, truncated desc, cold start empty; categories stay names-only", () => {
+		const long = `${"word ".repeat(40)}end.`;
 		const entries = [
-			skill("c1-a", { name: "c1-a", description: "d" }, "cat1"),
-			skill("c1-b", { name: "c1-b", description: "d" }, "cat1"),
+			skill(
+				"c1-a",
+				{ name: "c1-a", description: "d" },
+				"cat1",
+				"First sentence. Second sentence.",
+			),
+			skill("c1-b", { name: "c1-b", description: "d" }, "cat1", long),
 			skill("c2-a", { name: "c2-a", description: "d" }, "cat2"),
 			skill("c2-b", { name: "c2-b", description: "d" }, "cat2"),
-			skill("c2-c", { name: "c2-c", description: "d" }, "cat2"),
 		];
-		// limit 3: cat2 (3 skills) over, cat1 (2) fits — but cat1 has no recent
-		// skill either; total visible 5 > 3 and BOTH categories demote when
-		// none recently used. cat2 with a recently-used skill stays full.
-		const { result } = transform(entries, {
-			fullLimit: 3,
-			recentlyUsed: [join(root, "cat2", "c2-a", "SKILL.md")],
-		});
+		const used = { "c1-a": 3, "c1-b": 9, "c2-a": 1, ghost: 99 };
+		const { result } = transform(entries, { coreLimit: 2, usage: used });
 		if (!result) return expect(result).not.toBeNull();
-		expect(result.block).toMatch(
-			/\n\n# not shown in full\n {2}<collapsed category="cat1">c1-a, c1-b<\/collapsed>\n<\/available_skills>$/,
-		); // own section; no "hidden" pointer when nothing was hidden
-		expect(result.block).toContain('"c2-a"'); // full entry kept
-		expect(result.demoted).toEqual(["c1-a", "c1-b"]);
+		// Highest usage first; limit respected; unknown names ignored.
+		expect(result.core).toEqual(["c1-b", "c1-a"]);
+		expect(result.block).toContain(
+			'<skill name="c1-a" category="cat1">First sentence.</skill>',
+		);
+		const b = result.block.match(/name="c1-b"[^>]*>([^<]*)</)?.[1] ?? "";
+		expect(b.length).toBeLessThanOrEqual(100);
+		expect(b.endsWith("…")).toBe(true);
+		// Every skill is still in its category line, names only, sorted.
+		expect(result.block).toContain(
+			'<category name="cat1">c1-a, c1-b</category>',
+		);
+		expect(result.block).toContain(
+			'<category name="cat2">c2-a, c2-b</category>',
+		);
+
+		expect(
+			transform(entries, { coreLimit: 0, usage: used }).result?.core,
+		).toEqual([]);
+		expect(transform(entries).result?.block).not.toContain("# core");
+		expect(truncateDesc("Short one. More.", 100)).toBe("Short one.");
 	});
 
-	test("quality flags: malformed frontmatter and desc overlap", () => {
+	test("malformed frontmatter is flagged where it costs nothing", () => {
 		const dupDir = join(root, "dup");
 		mkdirSync(dupDir, { recursive: true });
 		writeFileSync(join(dupDir, "SKILL.md"), "---\nname: [broken\n---\n\nx\n");
 		const entries: Array<[string, string, string]> = [
-			["dup", "use when deploying the service", join(dupDir, "SKILL.md")],
-			skill(
-				"dup2",
-				{ name: "dup2", description: "use when deploying the service" },
-				undefined,
-				"use when deploying the service",
-			),
+			["dup", "use when deploying", join(dupDir, "SKILL.md")],
 			skill("clean", { name: "clean", description: "unrelated description" }),
 		];
 		const { result } = transform(entries);
 		if (!result) return expect(result).not.toBeNull();
-		expect(result.flagged).toContain("dup");
-		expect(result.flagged).toContain("dup2");
-		expect(result.block).toMatch(/⚠ malformed frontmatter/);
-		expect(result.block).toMatch(
-			/⚠ possible overlap dup2≈dup|⚠ possible overlap dup≈dup2/,
-		);
+		expect(result.flagged).toEqual(["dup"]);
+		expect(result.block).toContain("clean, dup⚠");
 	});
 
 	test("unparseable / missing native block → passthrough (null)", () => {
 		expect(
-			transformSkillsIndex("no block at all", 50, [], {
+			transformSkillsIndex("no block at all", {
 				skillsRoot: root,
 				knownRoots: [root],
 				cwd: "/home/proj",
 				hostPlatform: "darwin",
 				requiresCheck: () => true,
 				metaCache,
+				coreLimit: 15,
+				usage: new Map(),
 			}),
 		).toBeNull();
 		const broken =
 			"pre\n<available_skills>\n  totally not xml\n</available_skills>\npost";
 		expect(
-			transformSkillsIndex(broken, 50, [], {
+			transformSkillsIndex(broken, {
 				skillsRoot: root,
 				knownRoots: [root],
 				cwd: "/home/proj",
 				hostPlatform: "darwin",
 				requiresCheck: () => true,
 				metaCache,
+				coreLimit: 15,
+				usage: new Map(),
 			}),
 		).toBeNull();
 	});
 
-	test("categoryOf: skill-dir parent relative to root; general/other fallbacks", () => {
+	test("categoryOf: skill-dir parent relative to root; uncategorized/other fallbacks", () => {
 		expect(categoryOf(join(root, "cat", "x", "SKILL.md"), root)).toBe("cat");
-		expect(categoryOf(join(root, "name", "SKILL.md"), root)).toBe("general");
+		expect(categoryOf(join(root, "name", "SKILL.md"), root)).toBe(
+			"uncategorized",
+		);
 		expect(categoryOf("/outside/anywhere/SKILL.md", root)).toBe("other");
 	});
 

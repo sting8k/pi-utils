@@ -2,13 +2,16 @@
  * pi-utils / skill-write — the write half of the self-improving skill loop
  * (US-004).
  *
- * Registers `skill_write` (create/patch/delete on SKILL.md under the native
+ * Registers `skill_write` (create/patch/delete/move on SKILL.md under the native
  * skills root, single-op, snapshot rollback per the US-003 discipline) and
- * ONE before_agent_start handler that (a) re-renders native's
- * <available_skills> block through the smart-index visibility pipeline
- * (config skills.index: smart | native) and (b) appends the prompt rules
- * block. Read-before-write guard + smart-index "recently-used" share one
- * session seen-map keyed on read-tool calls (bash cat never counts).
+ * ONE before_agent_start handler that (a) swaps native's <available_skills>
+ * block for the tier-1 catalog (config skills.index: smart | native) —
+ * computed ONCE per session and reused verbatim, so the system prompt is
+ * byte-stable across turns —, (b) appends the prompt rules block, and (c)
+ * returns the tier-2 per-turn skill hint as a `message` (US-005). The
+ * read-before-write guard uses one session seen-map keyed on read-tool calls
+ * (bash cat never counts); successful SKILL.md reads also feed the
+ * cross-session usage file that drives the catalog's `core` group.
  *
  * Discovery/injection stay native — we never rescan; we only transform the
  * block pi already rendered, and pass through untouched on any parse miss.
@@ -18,7 +21,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
 	type ExtensionAPI,
 	getAgentDir,
@@ -48,18 +51,31 @@ import {
 	type SeenMap,
 } from "../src/skills/guard.ts";
 import {
+	buildHintIndex,
+	buildQuery,
+	createActivityLog,
+	formatHint,
+	type HintIndex,
+	rankHints,
+} from "../src/skills/hint.ts";
+import {
+	replaceSkillsBlock,
 	rootOf,
 	type SkillMeta,
 	transformSkillsIndex,
+	type VisibleSkill,
 } from "../src/skills/index-transform.ts";
 import { createNudgeTracker } from "../src/skills/nudge.ts";
+import { loadUsage, recordUse } from "../src/skills/usage.ts";
 import {
 	createSkill,
 	deleteSkill,
+	locateSkill,
+	moveSkill,
 	patchSkill,
 	resolveSkillMdPath,
 	SKILL_MD,
-	skillDir,
+	validateTarget,
 } from "../src/skills/write.ts";
 
 const RULES_BLOCK = `
@@ -70,7 +86,8 @@ starting. If a skill is wrong or missing steps, patch it with
 skill_write before finishing. After a hard task or a user
 correction, save the lesson as a skill: class-level name (never
 "fix-X-today"), description = "Use when <trigger>", rules with
-why — not a session log.
+why — not a session log. File it under the category matching the
+context where it will be used.
 `;
 
 export default function skillWriteExtension(pi: ExtensionAPI) {
@@ -79,7 +96,14 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 	let metaCache = new Map<string, SkillMeta | null>();
 	let pendingReads = new Map<string, string>(); // toolCallId → resolved SKILL.md
 	let tracker = createNudgeTracker(DEFAULT_SETTINGS.skills.nudgeInterval);
+	// Tier 1 (US-005): computed on the first before_agent_start of a session,
+	// then reused verbatim. null = native block unparseable → passthrough.
+	let catalog: { block: string; visible: VisibleSkill[] } | null | undefined;
+	let hintIndex: HintIndex | undefined;
+	let hinted = new Set<string>();
+	let activity = createActivityLog();
 	const skillsRoot = join(getAgentDir(), "skills");
+	const usageFile = join(getAgentDir(), "pi-utils-skill-usage.json");
 	const requiresCheck = createRequiresChecker(process.env);
 
 	// KILL-SWITCH (bean): disabledTools matching "skill_write" (exact or
@@ -101,6 +125,10 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 		metaCache = new Map();
 		pendingReads = new Map();
 		tracker = createNudgeTracker(settings.skills.nudgeInterval);
+		catalog = undefined;
+		hintIndex = undefined;
+		hinted = new Set();
+		activity = createActivityLog();
 		const droid = await loadDroidRenderers();
 		registerTool(droid);
 	});
@@ -111,6 +139,7 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 		if (event.type !== "tool_call") return;
 		const isSkillWrite = event.toolName === "skill_write";
 		tracker.onToolCall(isSkillWrite);
+		activity.note(event.toolName, event.input);
 		if (isToolCallEventTypeRead(event)) {
 			const raw = (event.input as { path?: unknown }).path;
 			if (typeof raw === "string") {
@@ -124,40 +153,74 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 		if (event.type !== "tool_result") return;
 		const pending = pendingReads.get(event.toolCallId);
 		pendingReads.delete(event.toolCallId);
-		if (pending && !event.isError) seen.mark(pending);
+		if (pending && !event.isError) {
+			// Usage counts a skill once per session — re-reads add no evidence.
+			if (layerEnabled && !seen.has(pending)) {
+				recordUse(usageFile, basename(dirname(pending)), Date.now());
+			}
+			seen.mark(pending);
+		}
 		const nudge = layerEnabled ? tracker.onToolResult(event.isError) : null;
 		if (nudge) {
 			return { content: [...event.content, { type: "text", text: nudge }] };
 		}
 	});
 
-	// ONE handler: smart-index transform + rules-block append, single return.
+	// ONE handler: tier-1 catalog + rules block + tier-2 hint, single return.
 	pi.on("before_agent_start", (event, ctx) => {
 		if (!layerEnabled) return undefined; // kill-switch: passthrough native
 		let systemPrompt = event.systemPrompt;
 		if (settings.skills.index !== "native") {
-			const result = transformSkillsIndex(
-				systemPrompt,
-				settings.skills.indexFullLimit,
-				seen.paths(),
-				{
+			if (catalog === undefined) {
+				const usage = loadUsage(usageFile, Date.now());
+				if (usage.warning) {
+					ctx.ui.notify(
+						`pi-utils skill-write: skill usage file ignored — ${usage.warning}`,
+						"warning",
+					);
+				}
+				const result = transformSkillsIndex(systemPrompt, {
 					skillsRoot,
 					knownRoots: scanRoots(skillsRoot, ctx.cwd),
 					cwd: ctx.cwd,
 					hostPlatform: process.platform,
 					requiresCheck,
 					metaCache,
-				},
-			);
-			if (result) {
-				systemPrompt =
-					systemPrompt.slice(0, result.start) +
-					result.block +
-					systemPrompt.slice(result.end);
+					coreLimit: settings.skills.coreLimit,
+					usage: usage.scores,
+				});
+				catalog = result && { block: result.block, visible: result.visible };
 			}
-			// Parse miss → passthrough the native block unchanged.
+			// Parse miss (null) → passthrough the native block unchanged.
+			if (catalog)
+				systemPrompt = replaceSkillsBlock(systemPrompt, catalog.block);
 		}
-		return { systemPrompt: systemPrompt + RULES_BLOCK };
+
+		let message:
+			| { customType: string; content: string; display: boolean }
+			| undefined;
+		if (settings.skills.hint && catalog) {
+			hintIndex ??= buildHintIndex(catalog.visible);
+			const exclude = new Set(hinted);
+			for (const path of seen.paths()) exclude.add(basename(dirname(path)));
+			const hits = rankHints(
+				hintIndex,
+				buildQuery(event.prompt, activity.tokens(ctx.cwd)),
+				exclude,
+			);
+			if (hits.length > 0) {
+				for (const hit of hits) hinted.add(hit.name);
+				message = {
+					customType: "skill-hint",
+					content: formatHint(hits),
+					display: false,
+				};
+			}
+		}
+		return {
+			systemPrompt: systemPrompt + RULES_BLOCK,
+			...(message ? { message } : {}),
+		};
 	});
 
 	function registerTool(droid: DroidRenderers | null): void {
@@ -167,12 +230,12 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 			name: "skill_write",
 			label: "skill_write",
 			description:
-				"Write side of the skills loop: create a new skill (SKILL.md), patch an existing one (old_string → new_string), or delete one — under ~/.pi/agent/skills/. Single op per call, snapshot rollback on failure. patch/delete require reading the skill's SKILL.md with read() first.",
+				"Write side of the skills loop: create a new skill (SKILL.md), patch an existing one (old_string → new_string), delete one, or move it to another category — under ~/.pi/agent/skills/<category>/. Pick the category by the context the skill is used in. Single op per call, snapshot rollback on failure. patch/delete/move find the skill by name and require reading its SKILL.md with read() first.",
 			promptSnippet:
-				"Create/patch/delete learned-procedure skills under ~/.pi/agent/skills/ (read-before-write guarded)",
+				"Create/patch/delete/move learned-procedure skills under ~/.pi/agent/skills/ (read-before-write guarded)",
 			promptGuidelines: [
 				'Create needs the full SKILL.md text (frontmatter with name + "Use when …" description, then rules with why).',
-				"Patch/delete require a prior read() of that SKILL.md this session — quotes from bash cat do not count.",
+				"Patch/delete/move require a prior read() of that SKILL.md this session — quotes from bash cat do not count.",
 				"After a hard task or a user correction, save the lesson as a skill with a class-level name.",
 			],
 			parameters: Type.Object({
@@ -184,13 +247,20 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 						Type.Literal("create"),
 						Type.Literal("patch"),
 						Type.Literal("delete"),
+						Type.Literal("move"),
 					],
 					{ description: "One operation per call" },
 				),
 				category: Type.Optional(
 					Type.String({
 						description:
-							"Optional single subdirectory under the skills root (create)",
+							"Category dir under the skills root. Required for create/move (an existing one, or a new one with new_category:true); optional for patch/delete (skill is found by name)",
+					}),
+				),
+				new_category: Type.Optional(
+					Type.Boolean({
+						description:
+							"Allow category to be a new directory (create/move, default false)",
 					}),
 				),
 				content: Type.Optional(
@@ -242,8 +312,8 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 		});
 
 		if (!name) return fail("name is required");
-		const dir = skillDir({ skillsRoot, name, category });
-		const skillMd = join(dir, SKILL_MD);
+		const targetError = validateTarget({ name, category });
+		if (targetError) return fail(targetError);
 
 		if (action === "create") {
 			const content = params.content;
@@ -252,7 +322,15 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 					"create needs content — the full SKILL.md text (frontmatter with name + description, then rules)",
 				);
 			}
-			const result = createSkill({ skillsRoot, name, category }, content);
+			const result = createSkill(
+				{
+					skillsRoot,
+					name,
+					category,
+					newCategory: params.new_category === true,
+				},
+				content,
+			);
 			if (!result.ok)
 				return fail(result.error, { rolledBack: result.rolledBack });
 			return {
@@ -266,29 +344,38 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 			};
 		}
 
+		if (action !== "patch" && action !== "delete" && action !== "move") {
+			return fail(
+				`unknown action ${String(action)} — use create | patch | delete | move`,
+			);
+		}
+		// move's `category` is the destination — locate by name alone.
+		const located = locateSkill(
+			skillsRoot,
+			name,
+			action === "move" ? undefined : category,
+		);
+		if (!located.ok) return fail(located.error);
+		const { dir, skillMd } = located;
+		// Read-before-write guard: existing skills must be read this session.
+		if (!seen.has(resolve(skillMd))) {
+			return fail(
+				`Read the skill first: read(${skillMd}) — writes must be based on current content.`,
+				{ guard: "read-before-write" },
+			);
+		}
+
 		if (action === "patch") {
 			const oldString = params.old_string;
 			const newString = params.new_string;
 			if (typeof oldString !== "string" || typeof newString !== "string") {
 				return fail("patch needs old_string + new_string");
 			}
-			if (!existsSync(skillMd)) {
-				return fail(`no skill at ${dir} — create it with action:"create"`);
-			}
-			// Read-before-write guard: existing skills must be read this session.
-			if (!seen.has(resolve(skillMd))) {
-				return fail(
-					`Read the skill first: read(${skillMd}) — writes must be based on current content.`,
-					{ guard: "read-before-write" },
-				);
-			}
 			const replaceAll = params.replace_all === true;
 			const result = patchSkill(skillMd, oldString, newString, replaceAll);
 			if (!result.ok)
 				return fail(result.error, { rolledBack: result.rolledBack });
-			const before = oldString;
-			const after = newString;
-			const diff = cap(formatDiffs(diffHunks(before, after)));
+			const diff = cap(formatDiffs(diffHunks(oldString, newString)));
 			return {
 				content: [
 					{
@@ -301,15 +388,6 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 		}
 
 		if (action === "delete") {
-			if (!existsSync(skillMd)) {
-				return fail(`no skill at ${dir} — nothing to delete`);
-			}
-			if (!seen.has(resolve(skillMd))) {
-				return fail(
-					`Read the skill first: read(${skillMd}) — writes must be based on current content.`,
-					{ guard: "read-before-write" },
-				);
-			}
 			const result = deleteSkill(dir);
 			if (!result.ok)
 				return fail(result.error, { rolledBack: result.rolledBack });
@@ -319,9 +397,21 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 			};
 		}
 
-		return fail(
-			`unknown action ${String(action)} — use create | patch | delete`,
-		);
+		const result = moveSkill(located, {
+			skillsRoot,
+			name,
+			category,
+			newCategory: params.new_category === true,
+		});
+		if (!result.ok)
+			return fail(result.error, { rolledBack: result.rolledBack });
+		seen.rename(resolve(skillMd), resolve(result.path));
+		return {
+			content: [
+				{ type: "text", text: `skill moved: ${skillMd} → ${result.path}` },
+			],
+			details: { action, name, path: result.path },
+		};
 	}
 
 	// Initial settings load + eager registration (session_start reloads:
