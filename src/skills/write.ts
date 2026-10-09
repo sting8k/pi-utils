@@ -70,7 +70,11 @@ function isDir(path: string): boolean {
 	}
 }
 
-/** Category dirs = valid-named directories under the root that are not themselves skills. */
+/**
+ * Category dirs = valid-named directories under the root that are not
+ * themselves skills and hold at least one skill (notes/empty dirs are not
+ * categories — listing them invites skills into them).
+ */
 function categoryDirs(skillsRoot: string): string[] {
 	let entries: string[];
 	try {
@@ -82,7 +86,10 @@ function categoryDirs(skillsRoot: string): string[] {
 		(entry) =>
 			SKILL_NAME_RE.test(entry) &&
 			isDir(join(skillsRoot, entry)) &&
-			!existsSync(join(skillsRoot, entry, SKILL_MD)),
+			!existsSync(join(skillsRoot, entry, SKILL_MD)) &&
+			readdirSync(join(skillsRoot, entry)).some((child) =>
+				existsSync(join(skillsRoot, entry, child, SKILL_MD)),
+			),
 	);
 }
 
@@ -111,9 +118,14 @@ function checkCategory(target: SkillTarget): string | null {
 		return `category is required — ${categoryLine(skillsRoot)} — pick the one matching the context this skill is used in, or pass new_category:true with a new name`;
 	}
 	if (categoryDirs(skillsRoot).includes(category)) return null;
-	if (existsSync(join(skillsRoot, category))) {
+	const dir = join(skillsRoot, category);
+	if (existsSync(join(dir, SKILL_MD))) {
 		return `"${category}" is a skill, not a category — ${categoryLine(skillsRoot)}`;
 	}
+	if (existsSync(dir) && !isDir(dir)) {
+		return `"${category}" exists and is not a directory — ${categoryLine(skillsRoot)}`;
+	}
+	// An existing dir with no skills yet (empty, notes) needs new_category like a fresh one.
 	if (!target.newCategory) {
 		return `category "${category}" does not exist — ${categoryLine(skillsRoot)} — pick one, or pass new_category:true to create it`;
 	}

@@ -242,6 +242,10 @@ describe("skill organization (US-005): categories, locate-by-name, move", () => 
 		seed(skillsRoot, "a2", "testing");
 		seed(skillsRoot, "b1", "git-release");
 		seed(skillsRoot, "legacy"); // root-level skill is not a category
+		// A dir holding no skills (notes, empty) is not a category either.
+		mkdirSync(join(skillsRoot, "notes"), { recursive: true });
+		writeFileSync(join(skillsRoot, "notes", "AGENTS.md"), "x");
+		mkdirSync(join(skillsRoot, "empty"), { recursive: true });
 
 		expect(listCategories(skillsRoot)).toEqual([
 			{ name: "git-release", count: 1 },
