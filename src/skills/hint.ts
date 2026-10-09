@@ -1,10 +1,10 @@
 /**
  * US-005 tier 2 — per-turn skill hint. A lexical (BM25F-lite, no embeddings)
- * ranker over the skills the tier-1 catalog already knows, queried with the
- * user prompt plus language-neutral session signals (cwd, recently touched
- * paths, tool / command names). Prompts are often Vietnamese while
- * descriptions are English, so the signals carry most of the weight for
- * non-English prompts; this is best-effort by design.
+ * ranker over the skills the tier-1 catalog already knows. Only the user
+ * prompt qualifies a skill; session signals (cwd, recently touched paths,
+ * tool / command names) only re-order prompt matches. A prompt with no
+ * English topic words therefore gets no hint — silence beats noise; this
+ * is best-effort by design.
  *
  * Fields: skill name ×3, tags ×2, description ×1. IDF down-weights words every
  * description shares ("use when"), so no stopword list is needed. A hint needs
@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import { basename, dirname, sep } from "node:path";
 import { truncateDesc, type VisibleSkill } from "./index-transform.ts";
 
-export const HINT_MAX = 4;
+export const HINT_MAX = 3;
 export const HINT_DESC_MAX = 120;
 /**
  * Calibrated by hand on a real set of a few hundred skills (US-005 doc):
@@ -27,6 +27,16 @@ export const HINT_DESC_MAX = 120;
  */
 export const HINT_MIN_SCORE = 7;
 const HINT_TAIL_RATIO = 0.5;
+/**
+ * Session signals (cwd, touched paths, tool / command names) only boost a
+ * skill the prompt already matched — never qualify one alone. Otherwise a
+ * repo whose name is a common skill prefix ("pi-…") hints its skills on every
+ * "ok". Same rule as cosmix/loom's skill-trigger ("tie-breaker, never a
+ * qualifier"); measured on a real set: noise on no-hint prompts 6/7 → 2/7.
+ */
+const CONTEXT_WEIGHT = 0.3;
+/** A term in this many earlier prompts of the session is framing (mail envelopes, templates), not topic. */
+const REPEAT_LIMIT = 2;
 
 const FIELD_WEIGHT = { name: 3, tags: 2, desc: 1 } as const;
 const K1 = 1.2;
@@ -110,13 +120,30 @@ export function buildHintIndex(skills: VisibleSkill[]): HintIndex {
 	return { docs, df, avgLen };
 }
 
-/** Skills above the score floor, best first, at most HINT_MAX, minus `exclude` (by name). */
+/**
+ * Skills above the score floor, best first, at most HINT_MAX, minus `exclude`
+ * (by name). Only `prompt` terms qualify a skill; `context` terms add
+ * CONTEXT_WEIGHT of their score to skills the prompt already matched.
+ */
 export function rankHints(
 	index: HintIndex,
-	query: Set<string>,
+	prompt: Set<string>,
+	context: Set<string>,
 	exclude: Set<string>,
 ): VisibleSkill[] {
-	const scored = scoreAll(index, query, exclude);
+	const boost = new Map<string, number>();
+	const ctxOnly = new Set([...context].filter((t) => !prompt.has(t)));
+	for (const s of scoreAll(index, ctxOnly, exclude)) {
+		boost.set(s.skill.name, s.score);
+	}
+	const scored = scoreAll(index, prompt, exclude)
+		.map((s) => ({
+			skill: s.skill,
+			score: s.score + CONTEXT_WEIGHT * (boost.get(s.skill.name) ?? 0),
+		}))
+		.sort(
+			(a, b) => b.score - a.score || a.skill.name.localeCompare(b.skill.name),
+		);
 	const floor = Math.max(
 		HINT_MIN_SCORE,
 		(scored[0]?.score ?? 0) * HINT_TAIL_RATIO,
@@ -196,11 +223,32 @@ export function createActivityLog(): ActivityLog {
 	};
 }
 
-/** Query = prompt words ∪ session signals. */
-export function buildQuery(prompt: string, signals: Set<string>): Set<string> {
-	const query = new Set(signals);
-	for (const t of tokenize(prompt.slice(0, PROMPT_CHARS))) query.add(t);
-	return query;
+/**
+ * Per-session prompt history: terms seen in REPEAT_LIMIT+ earlier prompts
+ * are dropped from the query (envelope / template words such as a mail
+ * wrapper's "reply … send"), so only what this prompt adds is scored.
+ */
+export interface PromptHistory {
+	/** Topical terms of `prompt`: markup tags stripped, repeated framing dropped; then records it. */
+	terms(prompt: string): Set<string>;
+}
+
+export function createPromptHistory(): PromptHistory {
+	const seen = new Map<string, number>();
+	return {
+		terms(prompt) {
+			// Tags and their attributes are framing (`<message from="… lead …">`), not topic.
+			const text = prompt
+				.slice(0, PROMPT_CHARS)
+				.replace(/<\/?[A-Za-z][^>]*>/g, " ");
+			const all = new Set(tokenize(text));
+			const out = new Set(
+				[...all].filter((t) => (seen.get(t) ?? 0) < REPEAT_LIMIT),
+			);
+			for (const t of all) seen.set(t, (seen.get(t) ?? 0) + 1);
+			return out;
+		},
+	};
 }
 
 /** Hint message body — compact: one line per skill, `~`-abbreviated path. */

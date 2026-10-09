@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	buildHintIndex,
-	buildQuery,
 	createActivityLog,
+	createPromptHistory,
 	HINT_MAX,
 	rankHints,
 } from "../src/skills/hint.ts";
@@ -42,9 +42,11 @@ describe("tier-2 hint ranking (US-005)", () => {
 	const index = buildHintIndex(corpus);
 
 	test("relevant prompt → ≤HINT_MAX best matches; unrelated prompt → none", () => {
+		const terms = (p: string) => createPromptHistory().terms(p);
 		const hits = rankHints(
 			index,
-			buildQuery("spawn a peer in acme and list the guilds", new Set()),
+			terms("spawn a peer in acme and list the guilds"),
+			new Set(),
 			new Set(),
 		);
 		expect(hits.length).toBeGreaterThan(0);
@@ -52,22 +54,45 @@ describe("tier-2 hint ranking (US-005)", () => {
 		expect(hits[0]?.name).toBe("acme-guilds-status-list");
 
 		expect(
-			rankHints(index, buildQuery("what is the weather", new Set()), new Set()),
+			rankHints(index, terms("what is the weather"), new Set(), new Set()),
 		).toEqual([]);
 	});
 
-	test("language-neutral signals (cwd, tool names) carry a non-English prompt; exclude drops repeats", () => {
+	test("session signals never qualify a skill alone, only re-order prompt matches; exclude drops repeats", () => {
 		const log = createActivityLog();
 		log.note("bash", { command: "FOO=1 git rebase main" });
-		log.note("read", { path: "/x/y.ts" }); // builtin tool name adds nothing
-		const query = buildQuery(
-			"làm tiếp đi",
-			log.tokens("/Users/me/work/acme-guilds"),
+		const ctx = log.tokens("/Users/me/work/acme-guilds");
+		// No topical prompt words: cwd/command alone must not hint (was: every turn in a matching repo).
+		expect(
+			rankHints(
+				index,
+				createPromptHistory().terms("làm tiếp đi"),
+				ctx,
+				new Set(),
+			),
+		).toEqual([]);
+		const prompt = createPromptHistory().terms("list the acme guilds");
+		const hits = rankHints(index, prompt, ctx, new Set());
+		expect(hits[0]?.name).toBe("acme-guilds-status-list");
+		const again = rankHints(
+			index,
+			prompt,
+			ctx,
+			new Set(["acme-guilds-status-list"]),
 		);
-		const hits = rankHints(index, query, new Set());
-		expect(hits.map((h) => h.name)).toContain("acme-guilds-status-list");
-		const again = rankHints(index, query, new Set(["acme-guilds-status-list"]));
 		expect(again.map((h) => h.name)).not.toContain("acme-guilds-status-list");
+	});
+
+	test("repeated framing (mail envelope) stops counting; markup attributes never count", () => {
+		const history = createPromptHistory();
+		const mail = (body: string) =>
+			`<message from="lead">${body}</message> reply using the guilds tool`;
+		expect(history.terms(mail("x"))).not.toContain("lead");
+		history.terms(mail("y"));
+		// Third mail: envelope words seen twice before are dropped, the body stays.
+		const third = history.terms(mail("rebase conflict"));
+		expect(third).not.toContain("guild");
+		expect(third).toContain("rebase");
 	});
 });
 

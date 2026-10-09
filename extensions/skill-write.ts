@@ -52,8 +52,8 @@ import {
 } from "../src/skills/guard.ts";
 import {
 	buildHintIndex,
-	buildQuery,
 	createActivityLog,
+	createPromptHistory,
 	formatHint,
 	type HintIndex,
 	rankHints,
@@ -102,6 +102,7 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 	let hintIndex: HintIndex | undefined;
 	let hinted = new Set<string>();
 	let activity = createActivityLog();
+	let prompts = createPromptHistory();
 	const skillsRoot = join(getAgentDir(), "skills");
 	const usageFile = join(getAgentDir(), "pi-utils-skill-usage.json");
 	const requiresCheck = createRequiresChecker(process.env);
@@ -129,6 +130,7 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 		hintIndex = undefined;
 		hinted = new Set();
 		activity = createActivityLog();
+		prompts = createPromptHistory();
 		const droid = await loadDroidRenderers();
 		registerTool(droid);
 	});
@@ -205,7 +207,8 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 			for (const path of seen.paths()) exclude.add(basename(dirname(path)));
 			const hits = rankHints(
 				hintIndex,
-				buildQuery(event.prompt, activity.tokens(ctx.cwd)),
+				prompts.terms(event.prompt),
+				activity.tokens(ctx.cwd),
 				exclude,
 			);
 			if (hits.length > 0) {

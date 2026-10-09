@@ -76,7 +76,7 @@ needs, best-effort.
 - Rank skills lexically (BM25-ish, pure, no embeddings) against: the
   user prompt + cwd segments + recently touched file paths / tool
   names. Score over name tokens, description, tags.
-- Emit up to 3–4 above a threshold, desc truncated ~120 chars; nothing
+- Emit up to 3 above a threshold, desc truncated ~120 chars; nothing
   when none qualifies. Never re-hint a skill already hinted or read
   this session. Target 0–150 tok per turn.
 - Caveat: prompts are often Vietnamese, descriptions English →
@@ -105,9 +105,18 @@ needs, best-effort.
   occurrence); kept malformed (`name⚠`).
 - **Hint**: BM25F-lite, fields name×3 / tags×2 / description×1, k1 1.2,
   b 0.75, tiny suffix stemmer + English stopword list (kebab names
-  contain "is/for/in"). Query = prompt ∪ cwd's last 2 segments ∪ last
-  12 touched paths (dir+file name) ∪ non-builtin tool names and bash
-  command heads. Floor: score ≥ 7 and ≥ half the best score, max 4.
+  contain "is/for/in"). Only PROMPT terms qualify a skill: markup tags
+  (with attributes) are stripped and terms seen in 2+ earlier prompts of
+  the session are dropped (mail envelopes / templates). Session signals —
+  cwd's last 2 segments, last 12 touched paths (dir+file name),
+  non-builtin tool names and bash command heads — only add 0.3× their
+  score to skills the prompt already matched (a repo named like a skill
+  prefix no longer hints on "ok"; cf. cosmix/loom "tie-breaker, never a
+  qualifier"). Floor: score ≥ 7 and ≥ half the best score, max 3.
+  Bench (19 labelled prompts on a real set): no-hint prompts that still
+  got a hint 6/7 → 2/7 (first turn) / 1/7 (mid-session); precision of
+  shown hints 61% → 75–79%; relevant hits unchanged 13/13. Prompts with
+  no English topic words get no hint.
   Calibrated by hand on a real set of a few hundred skills: rare name word ≈6–9, rare
   description-only word ≈3–5, incidental single words 4–6. Rides on
   the smart index (candidates = the catalog's visible skills,
@@ -137,7 +146,7 @@ skills). It is not shipped in this package.
       reads (test asserts byte-identical system prompt on turn 2).
 - [x] core group respects limit + truncation; usage file survives
       restart; corrupt file → ignored with warning, not a crash.
-- [x] hint: relevant prompt yields ≤4 skills; unrelated prompt yields no
+- [x] hint: relevant prompt yields ≤3 skills; unrelated prompt yields no
       message; no repeats within a session.
 - [x] token budget measured on a real skill set and recorded.
 - [x] `bun test` + `npm run check` green; US-004 doc updated where its
