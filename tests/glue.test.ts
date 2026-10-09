@@ -677,8 +677,9 @@ describe("skill_write glue (US-004)", () => {
 			{ type: "before_agent_start", prompt: "", systemPrompt: native },
 			fakeCtx(root),
 		)) as { systemPrompt: string };
+		// One small skill → full catalog: name + description kept.
 		expect(result.systemPrompt).toContain(
-			'<category name="uncategorized">glue-skill',
+			'<skill name="glue-skill">use when glue testing',
 		);
 		expect(result.systemPrompt).toContain("## Skills"); // rules block appended
 

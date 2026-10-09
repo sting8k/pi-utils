@@ -59,6 +59,10 @@ needs, best-effort.
   verbatim every turn → no mid-session system-prompt change.
 - Same visibility filters as US-004 (platforms / requires / dirs /
   disable-model-invocation); same root grouping + collision rules.
+- Small sets: if every in-root skill fits with a ≤100-char description
+  in `FULL_CATALOG_MAX_CHARS` (6000 ≈ 1.5k tok), list them all with
+  descriptions (`category="…"` attr; none for root-level) and skip core —
+  names-only only pays off at a few hundred skills. Above the budget:
 - Per category one line: `<category name="…">a, b, c</category>`.
 - `core` group: up to N (default 15, setting `skills.coreLimit`) most
   used skills with descriptions truncated to ~100 chars (first

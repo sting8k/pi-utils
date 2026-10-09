@@ -63,6 +63,8 @@ export interface IndexTransformDeps {
 	usage: Map<string, number>;
 	/** Injectable fs for tests. Defaults to node fs. */
 	readSkillFile?: (path: string) => string | null;
+	/** Full-catalog budget override (tests). Defaults to FULL_CATALOG_MAX_CHARS. */
+	fullCatalogMaxChars?: number;
 }
 
 /** A skill that survived the visibility pipeline (feeds the tier-2 hint). */
@@ -72,6 +74,15 @@ export interface VisibleSkill extends SkillIndexEntry {
 
 /** Description cap in `core` and outside-root entries. */
 export const CORE_DESC_MAX = 100;
+/**
+ * Small sets keep descriptions: when every in-root skill fits with a
+ * CORE_DESC_MAX description inside this many chars (≈1.5k tok), the catalog
+ * lists them all with descriptions (no core group needed); above it, the
+ * names-only category lines + core group take over. Names-only only pays
+ * off at a few hundred skills — below that it just drops the "Use when …"
+ * trigger text. Decided once per session with the catalog (cache-stable).
+ */
+export const FULL_CATALOG_MAX_CHARS = 6000;
 
 export interface IndexTransformResult {
 	/** The re-emitted `<available_skills>…</available_skills>` block. */
@@ -162,6 +173,7 @@ export function transformSkillsIndex(
 			tags: stringArray(meta?.tags),
 		};
 	});
+	type CatalogRow = (typeof rows)[number];
 	const inRoot = rows.filter((r) => r.category !== "other");
 	const external = rows.filter((r) => r.category === "other");
 
@@ -179,32 +191,44 @@ export function transformSkillsIndex(
 
 	const flag = (bad: boolean) => (bad ? " ⚠ malformed frontmatter" : "");
 	const lines: string[] = ["<available_skills>"];
-	if (coreRows.length > 0) {
-		lines.push("# core (most used)");
-		for (const { entry, bad, category } of coreRows) {
-			lines.push(
-				`  <skill name="${escapeXml(entry.name)}" category="${escapeXml(category)}">${escapeXml(truncateDesc(entry.description, CORE_DESC_MAX))}${flag(bad)}</skill>`,
-			);
-		}
-	}
+	const header = `# categories in ${escapeXml(deps.skillsRoot)} — file = <category>/<name>/SKILL.md (${UNCATEGORIZED}: <name>/SKILL.md)`;
+	const sortedInRoot = [...inRoot].sort(
+		(a, b) =>
+			Number(a.category === UNCATEGORIZED) -
+				Number(b.category === UNCATEGORIZED) ||
+			a.category.localeCompare(b.category) ||
+			a.entry.name.localeCompare(b.entry.name),
+	);
+	const fullLines = sortedInRoot.map(({ entry, bad, category }) => {
+		const catAttr =
+			category === UNCATEGORIZED ? "" : ` category="${escapeXml(category)}"`;
+		return `  <skill name="${escapeXml(entry.name)}"${catAttr}>${escapeXml(truncateDesc(entry.description, CORE_DESC_MAX))}${flag(bad)}</skill>`;
+	});
+	const fullFits =
+		fullLines.reduce((n, l) => n + l.length + 1, 0) <=
+		(deps.fullCatalogMaxChars ?? FULL_CATALOG_MAX_CHARS);
+	let core: CatalogRow[] = [];
 
-	if (inRoot.length > 0) {
-		lines.push(
-			`# categories in ${escapeXml(deps.skillsRoot)} — file = <category>/<name>/SKILL.md (${UNCATEGORIZED}: <name>/SKILL.md)`,
-		);
+	if (inRoot.length > 0 && fullFits) {
+		lines.push(header, ...fullLines);
+	} else if (inRoot.length > 0) {
+		core = coreRows;
+		if (core.length > 0) {
+			lines.push("# core (most used)");
+			for (const { entry, bad, category } of core) {
+				lines.push(
+					`  <skill name="${escapeXml(entry.name)}" category="${escapeXml(category)}">${escapeXml(truncateDesc(entry.description, CORE_DESC_MAX))}${flag(bad)}</skill>`,
+				);
+			}
+		}
+		lines.push(header);
 		const byCategory = new Map<string, string[]>();
-		for (const { entry, bad, category } of inRoot) {
+		for (const { entry, bad, category } of sortedInRoot) {
 			const names = byCategory.get(category) ?? [];
 			names.push(`${entry.name}${bad ? "⚠" : ""}`);
 			byCategory.set(category, names);
 		}
-		const categories = [...byCategory.keys()].sort(
-			(a, b) =>
-				Number(a === UNCATEGORIZED) - Number(b === UNCATEGORIZED) ||
-				a.localeCompare(b),
-		);
-		for (const category of categories) {
-			const names = (byCategory.get(category) ?? []).sort();
+		for (const [category, names] of byCategory) {
 			lines.push(
 				`  <category name="${escapeXml(category)}">${escapeXml(names.join(", "))}</category>`,
 			);
@@ -250,7 +274,7 @@ export function transformSkillsIndex(
 	return {
 		block: lines.join("\n"),
 		hidden,
-		core: coreRows.map((r) => r.entry.name),
+		core: core.map((r) => r.entry.name),
 		flagged,
 		visible: rows.map((r) => ({ ...r.entry, tags: r.tags })),
 	};

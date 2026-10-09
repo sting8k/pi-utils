@@ -63,6 +63,7 @@ function transform(
 		usage?: Record<string, number>;
 		requires?: (bin: string) => boolean;
 		cwd?: string;
+		fullMax?: number;
 	} = {},
 ) {
 	const prompt = `preamble\n${nativeBlock(entries)}\nepilogue`;
@@ -77,6 +78,8 @@ function transform(
 			metaCache,
 			coreLimit: opts.coreLimit ?? 15,
 			usage: new Map(Object.entries(opts.usage ?? {})),
+			// Default 0: these tests pin the compact (large-set) layout.
+			fullCatalogMaxChars: opts.fullMax ?? 0,
 		}),
 	};
 }
@@ -272,6 +275,23 @@ describe("tier-1 catalog (US-004/US-005)", () => {
 		).toEqual([]);
 		expect(transform(entries).result?.block).not.toContain("# core");
 		expect(truncateDesc("Short one. More.", 100)).toBe("Short one.");
+	});
+
+	test("small set fits the budget → every skill keeps its description; over budget → compact", () => {
+		const entries = [
+			skill("tiny-a", { name: "tiny-a", description: "Use when a" }, "cat-x"),
+			skill("tiny-b", { name: "tiny-b", description: "Use when b" }),
+		];
+		const full = transform(entries, { fullMax: 10_000 }).result;
+		expect(full?.block).toContain('<skill name="tiny-a" category="cat-x">');
+		expect(full?.block).toContain('<skill name="tiny-b">'); // uncategorized: no attr
+		expect(full?.block).not.toContain("<category ");
+		expect(full?.core).toEqual([]);
+		const compact = transform(entries, { fullMax: 10 }).result;
+		expect(compact?.block).toContain(
+			'<category name="cat-x">tiny-a</category>',
+		);
+		expect(compact?.block).not.toContain("Use when a");
 	});
 
 	test("malformed frontmatter is flagged where it costs nothing", () => {
