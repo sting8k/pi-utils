@@ -1,9 +1,15 @@
 {
 	"name": "@sting8k/pi-utils",
-	"version": "0.8.1",
+	"version": "0.8.2",
 	"description": "Utility extensions for the Pi coding agent: background shell (shell-bg) with bash search routing, script-mode edit, and the skills write layer (skill_write)",
 	"type": "module",
 	"license": "MIT",
+	"files": [
+		"extensions/",
+		"src/",
+		"README.md",
+		"LICENSE"
+	],
 	"keywords": [
 		"pi-package",
 		"pi-extension",
