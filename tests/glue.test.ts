@@ -1027,6 +1027,19 @@ describe("skill_write glue (US-004)", () => {
 			JSON.parse(readFileSync(usageFile, "utf8")).skills["beta-skill"].score,
 		).toBe(1);
 
+		// pi ≥1.2 custom-message run (no `prompt`): catalog stays, no hint, no crash.
+		const custom = (await captured.handlers.get("before_agent_start")?.[0]?.(
+			{
+				type: "before_agent_start",
+				messageType: "custom",
+				message: { role: "custom", customType: "x", content: "quokka zebras" },
+				systemPrompt: native,
+			} as never,
+			ctx,
+		)) as { systemPrompt: string; message?: unknown };
+		expect(custom.systemPrompt).toBe(t1.systemPrompt);
+		expect(custom.message).toBeUndefined();
+
 		// Tier 2: relevant prompt → hint message once; same prompt again → none.
 		const h1 = await turn(captured, "how do I handle quokka zebras?");
 		expect(h1.message?.content).toContain("zebra-quokka-handling");

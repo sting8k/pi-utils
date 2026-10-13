@@ -201,7 +201,9 @@ export default function skillWriteExtension(pi: ExtensionAPI) {
 		let message:
 			| { customType: string; content: string; display: boolean }
 			| undefined;
-		if (settings.skills.hint && catalog) {
+		// pi ≥1.2 also starts runs from custom messages (messageType "custom",
+		// no `prompt`): nothing the user typed to rank against → no hint.
+		if (settings.skills.hint && catalog && typeof event.prompt === "string") {
 			hintIndex ??= buildHintIndex(catalog.visible);
 			const exclude = new Set(hinted);
 			for (const path of seen.paths()) exclude.add(basename(dirname(path)));
