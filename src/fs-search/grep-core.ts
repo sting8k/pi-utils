@@ -1,5 +1,5 @@
 /**
- * grep tool core — fork of pi's built-in streaming grep (MIT,
+ * grep core (runs routed `rg`/`grep` from bash) — fork of pi's built-in streaming grep (MIT,
  * @earendil-works/pi-coding-agent) merged with dsh semantics:
  *
  * - streaming JSON parse with early kill once the match limit is reached

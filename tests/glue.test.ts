@@ -129,8 +129,7 @@ let root = "";
 beforeAll(async () => {
 	agentDir = mkdtempSync(join(tmpdir(), "pi-utils-agentdir-"));
 	process.env.PI_CODING_AGENT_DIR = agentDir;
-	// Explicit enabled-search baseline: DEFAULT_SETTINGS now ships
-	// grep/glob disabled (owner preference) — tool glue tests need them on.
+	// Explicit baseline settings so the glue tests do not depend on defaults.
 	writeFileSync(
 		join(agentDir, "pi-utils.json"),
 		JSON.stringify({ fsSearch: {}, shellBg: {}, disabledTools: [] }),

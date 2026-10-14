@@ -1,5 +1,5 @@
 /**
- * glob tool core — file discovery by name (dsh semantics, pi machinery).
+ * glob core (runs routed `find` from bash) — file discovery by name (dsh semantics, pi machinery).
  *
  * rg --files with --hidden and --no-ignore (gitignored files ARE results —
  * that is the point), VCS metadata excluded. Patterns without "/" match the
