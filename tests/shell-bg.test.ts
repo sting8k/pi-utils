@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -364,6 +364,24 @@ describe("spawnToFile", () => {
 		const exit = await spawned.exit;
 		expect(exit.code).toBe(0);
 		expect(existsSync(logPath)).toBe(false);
+	});
+
+	test("settles a clean exit before the host's event loop drains (issue #1)", () => {
+		// A fresh process with nothing else on its event loop, like `pi -p`
+		// after the provider closed its connection: the job must settle on the
+		// pipes ending, not on the unref'd grace timer.
+		const spawnModule = join(import.meta.dir, "../src/shell-bg/spawn.ts");
+		const script = `
+			import { spawnToFile } from ${JSON.stringify(spawnModule)};
+			spawnToFile(process.execPath, ["-e"], "console.log('hi')", ${JSON.stringify(dir)},
+				process.env, ${JSON.stringify(join(dir, "drain.log"))})
+				.exit.then((r) => console.log("settled " + r.code));
+		`;
+		const run = spawnSync(process.execPath, ["-e", script], {
+			encoding: "utf8",
+			timeout: 10_000,
+		});
+		expect(run.stdout.trim()).toBe("settled 0");
 	});
 });
 

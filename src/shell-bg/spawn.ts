@@ -80,8 +80,8 @@ export function spawnToFile(
 		let settled = false;
 		let info: { code: number | null; signal: NodeJS.Signals | null } | null =
 			null;
-		const stdoutEnded = child.stdout === null;
-		const stderrEnded = child.stderr === null;
+		let stdoutEnded = child.stdout === null;
+		let stderrEnded = child.stderr === null;
 
 		const finish = () => {
 			if (settled || !info) return;
@@ -101,8 +101,18 @@ export function spawnToFile(
 			}
 		};
 
-		child.stdout?.on("end", maybeFinish);
-		child.stderr?.on("end", maybeFinish);
+		// Mark each pipe ended so a clean exit settles at once. The grace timer
+		// is unref'd and only covers a pipe a grandchild still holds open; if it
+		// were the only path, a host with nothing else on its event loop (`pi -p`)
+		// exits before the job settles (issue #1).
+		child.stdout?.on("end", () => {
+			stdoutEnded = true;
+			maybeFinish();
+		});
+		child.stderr?.on("end", () => {
+			stderrEnded = true;
+			maybeFinish();
+		});
 		child.on("exit", (code, signal) => {
 			info = { code, signal };
 			maybeFinish();
