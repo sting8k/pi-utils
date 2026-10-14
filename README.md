@@ -44,7 +44,7 @@ A standalone search command sent to `bash` runs on the search cores instead of a
 
 ```
 bash(command="rg -i preset src")       # grep core
-bash(command="find src -name '*.ts'")  # glob core, newest first
+bash(command="find src -name '*.ts'")  # glob core, sorted by mtime, newest last
 ```
 
 Pipes, redirects, `$`, unknown flags, or anything else the matcher cannot map exactly run in real bash unchanged. Wrappers listed in `bashRouter.unwrapPrefixes` (default `["rtk"]`) are stripped before matching.
@@ -86,6 +86,10 @@ Pipes, redirects, `$`, unknown flags, or anything else the matcher cannot map ex
   "disabledTools": []
 }
 ```
+
+- `fsSearch`: limits for searches routed from `bash` (result caps, line length, timeout). These are not settings for separate `grep`/`glob` tools, which were removed in 0.7.0.
+- `shellBg`: when a command moves to the background, how much output a result shows, and how long a kill waits.
+- `bashRouter`: wrappers to strip before matching a search command.
 
 `disabledTools` turns off individual tools: `bash`, `shell_status`, `shell_kill`, `edit`, `skill_write`. A trailing `*` works as a wildcard (`"shell*"`).
 
