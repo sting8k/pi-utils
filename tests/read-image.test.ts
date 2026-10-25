@@ -80,8 +80,8 @@ beforeAll(async () => {
 	read = tools[0] as ReadTool;
 });
 
-const run = (params: Record<string, unknown>) =>
-	read.execute("t", params, undefined, undefined, { cwd: dir });
+const run = (params: Record<string, unknown>, model?: { input: string[] }) =>
+	read.execute("t", params, undefined, undefined, { cwd: dir, model });
 
 describe("read image compression", () => {
 	test("over the caps: compressed by default, pi's limits with original", async () => {
@@ -98,6 +98,18 @@ describe("read image compression", () => {
 		expect((full.content[1]?.data ?? "").length).toBeGreaterThan(200 * 1024);
 		expect(full.content[0]?.text).not.toContain("Compressed");
 	});
+
+	test("model without vision: still compressed, no original:true hint", async () => {
+		const text = await run({ path: "big.png" }, { input: ["text"] });
+		expect((text.content[1]?.data ?? "").length).toBeLessThanOrEqual(
+			200 * 1024,
+		);
+		expect(text.content[0]?.text).toContain("Compressed to");
+		expect(text.content[0]?.text).not.toContain("original: true");
+
+		const vision = await run({ path: "big.png" }, { input: ["text", "image"] });
+		expect(vision.content[0]?.text).toContain("original: true");
+	}, 30_000);
 
 	test("under the caps: image sent unchanged, no note", async () => {
 		const result = await run({ path: "small.png" });

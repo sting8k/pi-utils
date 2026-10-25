@@ -186,12 +186,20 @@ export async function shrinkReadImage(
 		/** ctx.model.inputLimits.images.resize — the model's own caps, if any. */
 		modelResize?: ImageResizeOptions;
 		original: boolean;
+		/**
+		 * False when the model cannot see images: the image is still compressed
+		 * (it is stored, and sent if the user switches to a vision model) but the
+		 * "read again with original: true" hint is dropped, because a retry
+		 * cannot help a model that never receives the image.
+		 */
+		modelSeesImages?: boolean;
 		deps: ReadImageDeps;
 	},
 ): Promise<ReadBlock[] | null> {
 	const image = content.find((block) => block.type === "image");
 	if (image?.type !== "image") return null;
 	const { limits, modelResize, original, deps } = opts;
+	const modelSeesImages = opts.modelSeesImages ?? true;
 	const bytes = new Uint8Array(Buffer.from(image.data, "base64"));
 
 	const safeWidth = modelResize?.maxWidth ?? PI_MAX_EDGE;
@@ -237,7 +245,9 @@ export async function shrinkReadImage(
 	if (dimension) lines.push(dimension);
 	if (compress && resized.data !== image.data) {
 		lines.push(
-			`[Compressed to ${size(resized.data.length)} to keep requests fast. If you need finer detail, read again with original: true; larger images slow every later request.]`,
+			modelSeesImages
+				? `[Compressed to ${size(resized.data.length)} to keep requests fast. If you need finer detail, read again with original: true; larger images slow every later request.]`
+				: `[Compressed to ${size(resized.data.length)}.]`,
 		);
 	}
 	return [
