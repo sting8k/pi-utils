@@ -38,6 +38,7 @@
 		"extensions": [
 			"./extensions/shell-bg.ts",
 			"./extensions/edit.ts",
+			"./extensions/read.ts",
 			"./extensions/skill-write.ts"
 		]
 	},

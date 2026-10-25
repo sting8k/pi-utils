@@ -284,6 +284,7 @@ describe("loadSettings — repair pass (owner decision 2026-09-15)", () => {
 			"disabledTools",
 			"edit",
 			"fsSearch",
+			"read",
 			"shellBg",
 			"skills",
 		]);
@@ -299,6 +300,7 @@ describe("loadSettings — repair pass (owner decision 2026-09-15)", () => {
 			"fsSearch.noIgnore",
 			"fsSearch.rawOutputMaxBytes",
 			"fsSearch.timeoutMs",
+			"read",
 			"shellBg.killGraceMs",
 			"shellBg.tailBytes",
 			"skills",

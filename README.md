@@ -1,6 +1,6 @@
 # pi-utils
 
-Utility extensions for the [Pi coding agent](https://github.com/earendil-works/pi): a background-aware `bash`, script-mode `edit`, and `skill_write` for agents that maintain their own skills.
+Utility extensions for the [Pi coding agent](https://github.com/earendil-works/pi): a background-aware `bash`, script-mode `edit`, a `read` that keeps images light, and `skill_write` for agents that maintain their own skills.
 
 ## Features
 
@@ -8,6 +8,7 @@ Utility extensions for the [Pi coding agent](https://github.com/earendil-works/p
 - **Search routing**: plain `rg` / `grep` / `find` commands run on capped search cores that include gitignored files
 - **`shell_status` / `shell_kill`**: list, inspect, and stop background jobs; a live widget shows running ones
 - **`edit`** (replaces the built-in): the model sends a script plus the files it may touch and gets the diff back; failures roll back
+- **`read`** (replaces the built-in): images over 1568px or 200 KB are compressed before they reach the model; `original: true` sends Pi's normal size
 - **`skill_write`**: create, patch, delete, or move `SKILL.md` files, with a compact skills index in the system prompt
 
 ## Installation
@@ -63,6 +64,17 @@ Pipes, redirects, `$`, unknown flags, or anything else the matcher cannot map ex
 - **No-op runs warn.** A script that changed nothing returns `no declared file changed`.
 - **Not a sandbox.** The script runs with your user's permissions.
 
+## read
+
+Pi's `read` sends images up to 2000px and 4.5 MB. The whole conversation, every image included, is resent on each request, so a few large images slow every later response. pi-utils `read` caps images at 1568px on the long edge and 200 KB, using Pi's own resizer: PNG is kept when it fits, otherwise JPEG at falling quality, then smaller dimensions.
+
+```
+read(path="shot.png")                  # 3520x2384 PNG -> 1568x1062 JPEG, 112 KB (Pi's read: 1.1 MB)
+read(path="shot.png", original=true)   # what Pi's read would send
+```
+
+A compressed image comes with a note telling the agent to use `original: true` when it needs finer detail. Text files read exactly as in Pi. Limits the model declares itself win when they are smaller.
+
 ## skill_write
 
 `skill_write` manages skills under `~/.pi/agent/skills/<category>/<name>/SKILL.md`. Each change is snapshotted and rolled back on failure, and a skill must be read before it can be changed. It also:
@@ -82,6 +94,7 @@ Pipes, redirects, `$`, unknown flags, or anything else the matcher cannot map ex
   "shellBg": { "autoBackgroundMs": 30000, "tailBytes": 8192, "killGraceMs": 3000 },
   "bashRouter": { "unwrapPrefixes": ["rtk"] },
   "edit": { "lang": "python", "timeoutSec": 10 },
+  "read": { "imageMaxEdge": 1568, "imageMaxBytes": 204800 },
   "skills": { "index": "smart", "coreLimit": 15, "hint": true, "nudgeInterval": 10 },
   "disabledTools": []
 }
@@ -90,10 +103,11 @@ Pipes, redirects, `$`, unknown flags, or anything else the matcher cannot map ex
 - `fsSearch`: limits for searches routed from `bash` (result caps, line length, timeout). These are not settings for separate `grep`/`glob` tools, which were removed in 0.7.0.
 - `shellBg`: when a command moves to the background, how much output a result shows, and how long a kill waits.
 - `bashRouter`: wrappers to strip before matching a search command.
+- `read`: image caps for reads without `original: true`. `imageMaxBytes` counts the base64 payload sent to the model.
 
-`disabledTools` turns off individual tools: `bash`, `shell_status`, `shell_kill`, `edit`, `skill_write`. A trailing `*` works as a wildcard (`"shell*"`).
+`disabledTools` turns off individual tools: `bash`, `shell_status`, `shell_kill`, `edit`, `read`, `skill_write`. A trailing `*` works as a wildcard (`"shell*"`).
 
-- `bash` or `edit`: Pi's built-in version takes over. Disabling `bash` also removes the job tools and the widget.
+- `bash`, `edit`, or `read`: Pi's built-in version takes over. Disabling `bash` also removes the job tools and the widget.
 - `skill_write`: turns off the tool, the index, and the reminder.
 
 ## Styling
