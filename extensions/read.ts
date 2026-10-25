@@ -67,12 +67,17 @@ export default function readExtension(pi: ExtensionAPI) {
 					ctx,
 				);
 				const model = ctx?.model as
-					| { inputLimits?: { images?: { resize?: ImageResizeOptions } } }
+					| {
+							input?: string[];
+							inputLimits?: { images?: { resize?: ImageResizeOptions } };
+					  }
 					| undefined;
 				const content = await shrinkReadImage(result.content as ReadBlock[], {
 					limits: settings.read,
 					modelResize: model?.inputLimits?.images?.resize,
 					original: original === true,
+					// Same test as pi's "model does not support images" note.
+					modelSeesImages: !model || (model.input?.includes("image") ?? true),
 					deps: {
 						resize: resizeImage,
 						formatDimensionNote,

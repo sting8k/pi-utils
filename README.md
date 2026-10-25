@@ -72,7 +72,7 @@ read(path="shot.png")                  # 3520x2384 PNG -> 1568x1062 JPEG, 57 KB 
 read(path="shot.png", original=true)   # what Pi's read would send
 ```
 
-A compressed image comes with a note telling the agent to use `original: true` when it needs finer detail. Text files read exactly as in Pi. Limits the model declares itself win when they are smaller.
+A compressed image comes with a note telling the agent to use `original: true` when it needs finer detail (left out when the model cannot see images, since a retry would not help it). Text files read exactly as in Pi. Limits the model declares itself win when they are smaller.
 
 ## skill_write
 
