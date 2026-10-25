@@ -23,12 +23,12 @@ Search routing needs `rg` on `PATH` or in `~/.pi/agent/bin`.
 
 `bash` keeps Pi's shell, cwd, and env, and changes only the lifecycle:
 
-| Situation | What happens |
-| --- | --- |
-| Finishes quickly | Returns normally |
+| Situation               | What happens                                                                |
+| ----------------------- | --------------------------------------------------------------------------- |
+| Finishes quickly        | Returns normally                                                            |
 | Still running after 30s | Moves to the background as `bg-1`; the result is delivered when it finishes |
-| `background: true` | Starts in the background right away |
-| `timeout: N` | Kills the whole process tree after N seconds |
+| `background: true`      | Starts in the background right away                                         |
+| `timeout: N`            | Kills the whole process tree after N seconds                                |
 
 ```
 shell_status()            # totals + newest 10 jobs, running first
@@ -52,13 +52,12 @@ Pipes, redirects, `$`, unknown flags, or anything else the matcher cannot map ex
 
 ## edit
 
-| Field | Required | Notes |
-| --- | --- | --- |
-| `code` | yes | python or node script, passed on stdin |
-| `paths` | yes | every file the script may touch |
-| `lang` | no | `python` (default) or `node` |
-| `timeout` | no | seconds (default 10); kills the process tree and rolls back |
-
+| Field     | Required | Notes                                                       |
+| --------- | -------- | ----------------------------------------------------------- |
+| `code`    | yes      | python or node script, passed on stdin                      |
+| `paths`   | yes      | every file the script may touch                             |
+| `lang`    | no       | `python` (default) or `node`                                |
+| `timeout` | no       | seconds (default 10); kills the process tree and rolls back |
 - **`paths` is the boundary.** Only declared files are snapshotted, diffed, and rolled back. Writes elsewhere are not seen.
 - **Failures roll back.** A nonzero exit, timeout, or abort restores every declared file and deletes the ones the script created.
 - **No-op runs warn.** A script that changed nothing returns `no declared file changed`.
@@ -66,10 +65,10 @@ Pipes, redirects, `$`, unknown flags, or anything else the matcher cannot map ex
 
 ## read
 
-Pi's `read` sends images up to 2000px and 4.5 MB. The whole conversation, every image included, is resent on each request, so a few large images slow every later response. pi-utils `read` caps images at 1568px on the long edge and 200 KB, using Pi's own resizer: PNG is kept when it fits, otherwise JPEG at falling quality, then smaller dimensions.
+Pi's `read` sends images up to 2000px and 4.5 MB. The whole conversation, every image included, is resent on each request, so a few large images slow every later response. pi-utils `read` caps images at 1568px on the long edge and 200 KB. Pi's resizer scales the image, and mozjpeg (4:4:4, full-resolution color) encodes it once at the highest quality up to 80 that fits. An image that already fits is sent untouched, and one that cannot fit at quality 40 is scaled down further.
 
 ```
-read(path="shot.png")                  # 3520x2384 PNG -> 1568x1062 JPEG, 112 KB (Pi's read: 1.1 MB)
+read(path="shot.png")                  # 3520x2384 PNG -> 1568x1062 JPEG, 57 KB (Pi's read: 1.1 MB)
 read(path="shot.png", original=true)   # what Pi's read would send
 ```
 
@@ -90,13 +89,30 @@ A compressed image comes with a note telling the agent to use `original: true` w
 
 ```json
 {
-  "fsSearch": { "noIgnore": true, "globMaxResults": 100, "grepMaxMatches": 250, "grepMaxLineBytes": 2000, "rawOutputMaxBytes": 20971520, "timeoutMs": 30000, "graceMs": 3000 },
-  "shellBg": { "autoBackgroundMs": 30000, "tailBytes": 8192, "killGraceMs": 3000 },
-  "bashRouter": { "unwrapPrefixes": ["rtk"] },
-  "edit": { "lang": "python", "timeoutSec": 10 },
-  "read": { "imageMaxEdge": 1568, "imageMaxBytes": 204800 },
-  "skills": { "index": "smart", "coreLimit": 15, "hint": true, "nudgeInterval": 10 },
-  "disabledTools": []
+	"fsSearch": {
+		"noIgnore": true,
+		"globMaxResults": 100,
+		"grepMaxMatches": 250,
+		"grepMaxLineBytes": 2000,
+		"rawOutputMaxBytes": 20971520,
+		"timeoutMs": 30000,
+		"graceMs": 3000
+	},
+	"shellBg": {
+		"autoBackgroundMs": 30000,
+		"tailBytes": 8192,
+		"killGraceMs": 3000
+	},
+	"bashRouter": { "unwrapPrefixes": ["rtk"] },
+	"edit": { "lang": "python", "timeoutSec": 10 },
+	"read": { "imageMaxEdge": 1568, "imageMaxBytes": 204800 },
+	"skills": {
+		"index": "smart",
+		"coreLimit": 15,
+		"hint": true,
+		"nudgeInterval": 10
+	},
+	"disabledTools": []
 }
 ```
 

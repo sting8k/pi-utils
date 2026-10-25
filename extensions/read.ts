@@ -3,8 +3,9 @@
  *
  * Wraps pi's own read definition (text reads, schema, renderers, structured
  * output stay pi's) and adds `original`. pi's read runs with
- * autoResizeImages: false; src/read/image.ts then does the single resize
- * pass: pi-utils limits by default, pi's limits with original: true.
+ * autoResizeImages: false; src/read/image.ts then resizes with pi's own
+ * resizer and encodes once with mozjpeg (src/read/codec.ts): pi-utils limits
+ * by default, pi's limits with original: true.
  *
  * Settings: ~/.pi/agent/pi-utils.json "read" section; disabledTools: ["read"]
  * leaves pi's built-in read in place. Warnings are shown by the other
@@ -23,6 +24,7 @@ import {
 	loadSettings,
 	type PiUtilsSettings,
 } from "../src/common/settings.ts";
+import { decodeImage, encodeJpeg } from "../src/read/codec.ts";
 import {
 	type ImageResizeOptions,
 	type ReadBlock,
@@ -71,7 +73,12 @@ export default function readExtension(pi: ExtensionAPI) {
 					limits: settings.read,
 					modelResize: model?.inputLimits?.images?.resize,
 					original: original === true,
-					deps: { resize: resizeImage, formatDimensionNote },
+					deps: {
+						resize: resizeImage,
+						formatDimensionNote,
+						decode: decodeImage,
+						encodeJpeg,
+					},
 				});
 				if (!content) return result;
 				// pi >= 1.4 returns structuredContent (codemode's read output).
