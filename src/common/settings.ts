@@ -48,6 +48,13 @@ export interface EditSettings {
 	timeoutSec: number;
 }
 
+export interface ReadSettings {
+	/** Long-edge cap (px) for images read without original: true (decision 0015). */
+	imageMaxEdge: number;
+	/** Cap on the base64 image payload (bytes) read without original: true. */
+	imageMaxBytes: number;
+}
+
 export interface SkillsSettings {
 	/**
 	 * System-prompt skills index (US-004): "smart" re-renders native's
@@ -71,6 +78,7 @@ export interface PiUtilsSettings {
 	shellBg: ShellBgSettings;
 	bashRouter: BashRouterSettings;
 	edit: EditSettings;
+	read: ReadSettings;
 	skills: SkillsSettings;
 	/** Tools skipped at registration time (US-002). Names must be in KNOWN_TOOLS. */
 	disabledTools: string[];
@@ -82,6 +90,7 @@ export const KNOWN_TOOLS = [
 	"shell_status",
 	"shell_kill",
 	"edit",
+	"read",
 	"skill_write",
 ] as const;
 
@@ -113,6 +122,12 @@ export const DEFAULT_SETTINGS: PiUtilsSettings = {
 	edit: {
 		lang: "python",
 		timeoutSec: 10,
+	},
+	read: {
+		// 1568: Anthropic standard-tier long edge (vision docs); those models
+		// downscale anything larger. 200 KB: owner choice 2026-10-25.
+		imageMaxEdge: 1568,
+		imageMaxBytes: 200 * 1024,
 	},
 	skills: {
 		index: "smart",
@@ -330,6 +345,19 @@ export function loadSettings(agentDir: string): SettingsLoadResult {
 				warnings.push(
 					`"bashRouter.unwrapPrefixes" invalid (${JSON.stringify(value)}) — using default`,
 				);
+			}
+		}
+	}
+
+	// read (decision 0015): a missing section stays silent — same A1 precedent.
+	const rRaw = merged.read;
+	if (rRaw !== undefined) {
+		if (!isRecord(rRaw)) {
+			warnings.push('"read" is not an object — using defaults');
+		} else {
+			const target = settings.read as unknown as Record<string, unknown>;
+			for (const key of Object.keys(settings.read)) {
+				applyNum(target, rRaw, "read", key, target[key] as number, warnings);
 			}
 		}
 	}

@@ -1,6 +1,6 @@
 {
 	"name": "@sting8k/pi-utils",
-	"version": "0.8.3",
+	"version": "0.9.0",
 	"description": "Utility extensions for the Pi coding agent: background shell (shell-bg) with bash search routing, script-mode edit, and the skills write layer (skill_write)",
 	"type": "module",
 	"license": "MIT",
@@ -25,7 +25,7 @@
 		"typebox": ">=1.1.24 <2.0.0"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.4.10",
+		"@biomejs/biome": "2.5.13",
 		"@earendil-works/pi-coding-agent": "^1.0.0",
 		"@earendil-works/pi-tui": "1.0.0",
 		"@sting8k/pi-droid-styling": "file:../pi-droid-styling",
@@ -38,6 +38,7 @@
 		"extensions": [
 			"./extensions/shell-bg.ts",
 			"./extensions/edit.ts",
+			"./extensions/read.ts",
 			"./extensions/skill-write.ts"
 		]
 	},
@@ -47,6 +48,8 @@
 		}
 	},
 	"dependencies": {
+		"@jsquash/jpeg": "^1.6.0",
+		"@jsquash/png": "^3.1.1",
 		"yaml": "^2.9.0"
 	}
 }
