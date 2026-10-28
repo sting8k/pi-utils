@@ -81,6 +81,7 @@ A compressed image comes with a note telling the agent to use `original: true` w
 - replaces Pi's `<available_skills>` list with a compact index, built once per session so the system prompt stays the same across turns. Small skill sets list every description; large ones list names by category plus the 15 most-used
 - hides skills whose `platforms`, `requires`, or `dirs` frontmatter does not match
 - suggests up to 3 relevant skills when the prompt matches them (`skills.hint`)
+- on `create`, lists the 3 existing skills closest to the new one, so the agent can merge into one that already covers the lesson
 - reminds the agent to save lessons every 10 iterations (`skills.nudgeInterval`, `0` turns it off)
 
 ## Settings

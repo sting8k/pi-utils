@@ -179,6 +179,25 @@ export function scoreAll(
 	);
 }
 
+/**
+ * The `max` existing skills closest to a draft (its name + description), best
+ * first, `exclude` (by name) skipped. No score floor: the probe on a real set
+ * found known duplicates at rank 1–2, but their scores overlap with sibling
+ * skills that are not duplicates, so the caller shows the list and the agent
+ * decides — it never gates a write.
+ */
+export function nearestSkills(
+	skills: VisibleSkill[],
+	draft: { name: string; description: string },
+	exclude: Set<string>,
+	max = HINT_MAX,
+): VisibleSkill[] {
+	const query = new Set(tokenize(`${draft.name} ${draft.description}`));
+	return scoreAll(buildHintIndex(skills), query, exclude)
+		.slice(0, max)
+		.map((s) => s.skill);
+}
+
 /** Rolling record of what the session has touched (paths, tool / command names). */
 export interface ActivityLog {
 	note(toolName: string, input: unknown): void;
@@ -252,7 +271,10 @@ export function createPromptHistory(): PromptHistory {
 }
 
 /** Hint message body — compact: one line per skill, `~`-abbreviated path. */
-export function formatHint(skills: VisibleSkill[]): string {
+export function formatHint(
+	skills: VisibleSkill[],
+	header = "Skills that may apply (read before starting if relevant):",
+): string {
 	const home = homedir();
 	const lines = skills.map((s) => {
 		const loc = s.location.startsWith(`${home}/`)
@@ -260,5 +282,5 @@ export function formatHint(skills: VisibleSkill[]): string {
 			: s.location;
 		return `- ${loc} — ${truncateDesc(s.description, HINT_DESC_MAX)}`;
 	});
-	return `Skills that may apply (read before starting if relevant):\n${lines.join("\n")}`;
+	return `${header}\n${lines.join("\n")}`;
 }

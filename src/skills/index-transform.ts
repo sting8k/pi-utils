@@ -27,7 +27,10 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, relative, sep } from "node:path";
-import { parseFrontmatterLenient } from "./frontmatter.ts";
+import {
+	DESCRIPTION_SOFT_LIMIT,
+	parseFrontmatterLenient,
+} from "./frontmatter.ts";
 
 export interface SkillIndexEntry {
 	name: string;
@@ -73,7 +76,7 @@ export interface VisibleSkill extends SkillIndexEntry {
 }
 
 /** Description cap in `core` and outside-root entries. */
-export const CORE_DESC_MAX = 100;
+export const CORE_DESC_MAX = DESCRIPTION_SOFT_LIMIT;
 /**
  * Small sets keep descriptions: when every in-root skill fits with a
  * CORE_DESC_MAX description inside this many chars (≈1.5k tok), the catalog
@@ -316,7 +319,7 @@ function defaultRead(path: string): string | null {
 	}
 }
 
-function stringArray(value: unknown): string[] {
+export function stringArray(value: unknown): string[] {
 	// YAML scalar shorthand ("platforms: linux") normalizes to [value] —
 	// silently dropping it would no-op the filter (field-reported bug).
 	if (typeof value === "string") return value ? [value] : [];

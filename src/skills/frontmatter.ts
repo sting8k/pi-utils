@@ -15,8 +15,12 @@ import { parse as parseYaml } from "yaml";
 export const SKILL_NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
 export const SKILL_NAME_MAX = 64;
 
-/** Description length above which create carries an ADVISORY warning. */
-export const DESCRIPTION_SOFT_LIMIT = 60;
+/**
+ * Description length the smart index keeps (core group, small sets) — longer
+ * ones are cut there, so create carries an ADVISORY warning above it. Native
+ * index mode renders descriptions in full.
+ */
+export const DESCRIPTION_SOFT_LIMIT = 100;
 
 export type FrontmatterResult =
 	| { ok: true; frontmatter: Record<string, unknown>; body: string }
@@ -133,7 +137,7 @@ export function validateCreate(
 		);
 	} else if (description.length > DESCRIPTION_SOFT_LIMIT) {
 		warnings.push(
-			`description is ${description.length} chars — the native index renders it in full (prompt bloat); consider ≤${DESCRIPTION_SOFT_LIMIT}`,
+			`description is ${description.length} chars — the smart index cuts it at ${DESCRIPTION_SOFT_LIMIT} (native mode renders it in full); put the trigger first`,
 		);
 	}
 

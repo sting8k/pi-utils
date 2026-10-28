@@ -135,16 +135,26 @@ error message names the way out.
 - `name` + `description` present; `name` `^[a-z0-9][a-z0-9_-]*$`,
   ≤64 chars
 - `category`: single dir name, same regex, no `/` `\`
-- `description` >60 chars → **advisory warning** (not rejection):
+- `description` >100 chars (`DESCRIPTION_SOFT_LIMIT` = the smart
+  index's `CORE_DESC_MAX` cut) → **advisory warning** (not rejection):
   response includes `warning` + `index_preview` showing the exact
-  rendered index line. (Native renders full descs — length is a
-  prompt-bloat concern, not a routing blocker; keep it advisory.)
+  rendered index line. (Smart mode cuts the tail; native renders full
+  descs — keep it advisory.) Was 60 until 2026-10-28: a number taken
+  from hermes' index cut, not ours; 192/270 learned skills exceeded it.
 - unknown fields pass through (native flags like
   `disable-model-invocation` untouched)
-- `platforms` / `requires` / `dirs` / `tags` / `related` are
+- `platforms` / `requires` / `dirs` / `tags` are
   tolerated-but-recommended: `create` response nudges including them
   (one line) — v2 filtering via `before_agent_start` can consume the
-  data on day one, no backfill
+  data on day one, no backfill. (`related` dropped from the nudge
+  2026-10-28: nothing reads it.)
+- `create` response lists the 3 nearest existing skills (hint
+  ranker over name + tags + description, read fresh from disk so
+  skills other sessions just wrote count). Advisory, never a gate: on
+  the real set (317 skills) known duplicates ranked 1–2, but their
+  scores (0.40–0.59 of self-score) overlap with non-duplicate siblings
+  (go/node kill-tree 0.69, docx/pptx 0.57) — no threshold separates
+  them, so the agent decides.
 - `patch`/`delete`: frontmatter checks skipped — existing skills
   stay maintainable; every rejection names the fix.
 
@@ -292,6 +302,8 @@ defaults).
   prompt index lists it (via smart transform of native's render)
 - create with long desc → succeeds, response carries warning +
   `index_preview`
+- create next to a similar skill → response lists it under "Similar
+  existing skills", never the new skill itself
 - patch on unviewed existing skill → read-before-write error; after
   `read()` → applies
 - `bash cat` then patch → still refused (guard keys on read tool)

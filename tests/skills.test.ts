@@ -83,7 +83,7 @@ describe("frontmatter parser (US-004)", () => {
 		expect(bad.errors[0]).toMatch(/≤64 chars|≤64/);
 
 		const long = validateCreate(
-			GOOD_SKILL("long-desc", `Use when ${"x".repeat(70)}`),
+			GOOD_SKILL("long-desc", `Use when ${"x".repeat(100)}`),
 		);
 		expect(long.errors).toHaveLength(0);
 		expect(long.warnings).toHaveLength(1);
@@ -109,7 +109,7 @@ describe("write ops (snapshot → write → verify)", () => {
 				category: "cat-a",
 				newCategory: true,
 			},
-			GOOD_SKILL("alpha", `Use when ${"y".repeat(70)}`),
+			GOOD_SKILL("alpha", `Use when ${"y".repeat(100)}`),
 		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return; // narrowing

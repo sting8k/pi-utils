@@ -56,6 +56,7 @@ import {
 	createPromptHistory,
 	formatHint,
 	type HintIndex,
+	nearestSkills,
 	rankHints,
 } from "../src/skills/hint.ts";
 import {
@@ -70,6 +71,7 @@ import { loadUsage, recordUse } from "../src/skills/usage.ts";
 import {
 	createSkill,
 	deleteSkill,
+	listSkills,
 	locateSkill,
 	moveSkill,
 	patchSkill,
@@ -448,7 +450,7 @@ function buildCreateText(
 				: "";
 		if (description.length > DESCRIPTION_SOFT_LIMIT) {
 			lines.push(
-				`warning: description is ${description.length} chars — the native index renders it in full (prompt bloat). Consider ≤${DESCRIPTION_SOFT_LIMIT}.`,
+				`warning: description is ${description.length} chars — the smart index cuts it at ${DESCRIPTION_SOFT_LIMIT} (native mode renders it in full). Put the trigger first.`,
 			);
 			const name =
 				typeof parsed.frontmatter.name === "string"
@@ -465,11 +467,28 @@ function buildCreateText(
 				`  <skill name="${name}"${locationAttr}>${description}</skill>`,
 			);
 		}
-		const recommended = ["platforms", "requires", "tags", "related"];
+		const recommended = ["platforms", "requires", "dirs", "tags"];
 		const present = recommended.some((key) => key in parsed.frontmatter);
 		if (!present) {
 			lines.push(
-				"tip: add platforms/requires/dirs/tags/related frontmatter — the smart index uses them for visibility filtering.",
+				"tip: platforms/requires/dirs frontmatter limit where the skill shows; tags help the per-turn hint find it.",
+			);
+		}
+		const name =
+			typeof parsed.frontmatter.name === "string"
+				? parsed.frontmatter.name
+				: "";
+		const near = nearestSkills(
+			listSkills(skillsRoot).filter((s) => s.location !== path),
+			{ name, description },
+			new Set([name]),
+		);
+		if (near.length > 0) {
+			lines.push(
+				formatHint(
+					near,
+					"Similar existing skills (closest by name + description) — if one already covers this lesson, merge into it (patch) and delete this one:",
+				),
 			);
 		}
 	}

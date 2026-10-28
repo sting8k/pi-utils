@@ -27,10 +27,12 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { snapshotPaths } from "../edit/snapshot.ts";
 import {
+	parseFrontmatterLenient,
 	SKILL_NAME_MAX,
 	SKILL_NAME_RE,
 	validateCreate,
 } from "./frontmatter.ts";
+import { stringArray, type VisibleSkill } from "./index-transform.ts";
 
 export const SKILL_MD = "SKILL.md";
 
@@ -173,6 +175,42 @@ export function locateSkill(
 		};
 	}
 	return { ok: true, ...(candidates[0] as SkillLocation) };
+}
+
+/**
+ * Every skill on disk under the root (root-level + one category level), read
+ * fresh — create's neighbour scan must see skills other sessions wrote after
+ * this session's catalog was built. Unparseable files are skipped.
+ */
+export function listSkills(skillsRoot: string): VisibleSkill[] {
+	const skills: VisibleSkill[] = [];
+	for (const cat of [undefined, ...categoryDirs(skillsRoot)]) {
+		const dir = join(skillsRoot, ...(cat ? [cat] : []));
+		let entries: string[];
+		try {
+			entries = readdirSync(dir).sort();
+		} catch {
+			continue;
+		}
+		for (const name of entries) {
+			const location = join(dir, name, SKILL_MD);
+			if (!existsSync(location)) continue;
+			let fm: Record<string, unknown> | null;
+			try {
+				fm = parseFrontmatterLenient(readFileSync(location, "utf8"));
+			} catch {
+				continue;
+			}
+			if (!fm) continue;
+			skills.push({
+				name,
+				description: typeof fm.description === "string" ? fm.description : "",
+				location,
+				tags: stringArray(fm.tags),
+			});
+		}
+	}
+	return skills;
 }
 
 /** Validate a skill name (all ops) / category (create) at the funnel. */

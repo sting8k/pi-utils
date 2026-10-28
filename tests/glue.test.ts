@@ -808,7 +808,7 @@ describe("skill_write glue (US-004)", () => {
 		await startSession(captured, fakeCtx(root));
 		const skillWrite = captured.tools.find((t) => t.name === "skill_write");
 		if (!skillWrite) throw new Error("skill_write missing");
-		const longDesc = `Use when ${"z".repeat(70)}`;
+		const longDesc = `Use when ${"z".repeat(100)}`;
 		const content = `---\nname: preview-skill\ndescription: ${longDesc}\n---\n\nbody\n`;
 
 		// No collision: group header + bare entry, no location attr.
@@ -871,6 +871,42 @@ describe("skill_write glue (US-004)", () => {
 		expect(withTwin.content[0]?.text).toContain(
 			`location="${join(agentDir, "skills", "glue-cat", "twin-skill", "SKILL.md")}"`,
 		);
+	});
+	test("create lists the nearest existing skills, never itself", async () => {
+		enableSkillWrite();
+		const { api, captured } = fakePi();
+		const mod = await import("../extensions/skill-write.ts");
+		mod.default(api);
+		await startSession(captured, fakeCtx(root));
+		const skillWrite = captured.tools.find((t) => t.name === "skill_write");
+		if (!skillWrite) throw new Error("skill_write missing");
+		// Written straight to disk AFTER session start (another session's
+		// create): the neighbour scan must see it anyway.
+		const existing = join(agentDir, "skills", "glue-cat", "exit-code-gate");
+		mkdirSync(existing, { recursive: true });
+		writeFileSync(
+			join(existing, "SKILL.md"),
+			"---\nname: exit-code-gate\ndescription: Use when a test pipe into grep gates a git commit on the exit code\n---\n\nbody\n",
+		);
+		const created = (await skillWrite.execute(
+			"nb1",
+			{
+				name: "commit-gate-exit-code",
+				action: "create",
+				category: "glue-cat",
+				content:
+					"---\nname: commit-gate-exit-code\ndescription: Use when chaining a test and git commit; grep hides the exit code\n---\n\nbody\n",
+			},
+			undefined,
+			undefined,
+			fakeCtx(root),
+		)) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+		expect(created.isError).toBeUndefined();
+		const text = created.content[0]?.text ?? "";
+		const section = text.slice(text.indexOf("Similar existing skills"));
+		expect(text).toContain("Similar existing skills");
+		expect(section).toContain("exit-code-gate/SKILL.md");
+		expect(section).not.toContain("commit-gate-exit-code/SKILL.md");
 	});
 	test("move: guard enforced, locate by name, seen entry follows the move", async () => {
 		enableSkillWrite();
